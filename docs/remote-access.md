@@ -15,7 +15,12 @@ sign-in and credential refresh stay in the desktop process.
    a port occupied by another app or configured for public Funnel.
 3. Choose **Create one-time pairing link**, copy it privately to the phone,
    open it in Safari or Chrome, and select **Pair this device**. Links expire
-   after five minutes and can be used once. A new link replaces the old one.
+   after five minutes and can be used once. A new link replaces the old one,
+   so use only the newest link and close older pairing tabs first. The page
+   shows the link's last six characters before pairing; tap only if they match
+   what the laptop displayed. Pairing failures name their HTTP status on the
+   page; the laptop log records the server-side reason without credential
+   material.
 4. Bookmark the private app address. The paired browser can use the full app.
    Enable browser storage and service workers; they authenticate navigation,
    assets, API requests, and event streams.
@@ -69,6 +74,15 @@ override is optional. Tailscale must be installed and available on `PATH`.
   follow redirects to another origin or port.
 - The desktop capability is inserted only for upstream API requests and never
   returned to a browser. Remote grants are stripped before forwarding.
+- Pairs are minted through the laptop window, or through the laptop-local
+  `POST /api/remote/pair` relay (per-launch desktop secret over direct
+  loopback; callers arriving through the gateway are refused, so paired
+  phones can never mint). The relay speaks to the shell over the existing
+  inherited Node IPC channel. Revocation and disable stay laptop-UI-only.
+- Unsafe browser POSTs outside the app origin are rejected, except an opaque
+  (`null`) origin paired with browser-certified same-origin fetch metadata,
+  which sandboxed webviews produce. Missing metadata and cross-site posts
+  stay rejected; tailnet-only ingress is unchanged.
 - `remote-access.json` stores the enabled setting, owned loopback target,
   non-reversible token hashes, and safe device metadata with mode 0600.
   Pairing and revocation commit through a flushed temporary file, atomic rename,
