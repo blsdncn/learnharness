@@ -350,6 +350,7 @@ test("pairing rejections are logged with reasons and keep a generic client messa
 	assert.ok(reasons.some((reason) => reason === "mismatch" || reason.startsWith("mismatch got=")), `expected mismatch in ${JSON.stringify(reasons)}`);
 	assert.ok(reasons.includes("expired"), `expected expired in ${JSON.stringify(reasons)}`);
 	assert.ok(lines.every((line) => !line.includes(grant ?? "impossible")), "grant material must never reach logs");
+	assert.ok(lines.some((line) => /^remote pairing minted \(#\d+ slot=[0-9a-f]{16}\)$/.test(line)), "mint log carries only a hash prefix");
 });
 
 test("sandboxed webviews pair when fetch metadata certifies same-origin delivery", async (t) => {

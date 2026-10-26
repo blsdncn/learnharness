@@ -31,6 +31,7 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 				d.expiresAt <= d.createdAt + SESSION_TTL) : [] };
 	} catch (error) { if (error.code !== "ENOENT") throw new Error("Remote access settings could not be read."); }
 	let server = null, origin = null, pairing = null, error = null;
+	let pairCount = 0;
 	let attemptWindow = 0, attempts = 0;
 	let serial = Promise.resolve();
 	const active = new Set();
@@ -148,7 +149,7 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 			if (typeof grant !== "string" || grant.length !== 43) { log(`remote pairing rejected: bad-grant (length=${typeof grant === "string" ? grant.length : typeof grant})`); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			if (!pairing) { log("remote pairing rejected: no-pending"); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			if (pairing.expiresAt <= now()) { log("remote pairing rejected: expired"); return json(res, 401, { error: "Pairing link expired or already used." }); }
-			if (pairing.hash !== hash(grant)) { log(`remote pairing rejected: mismatch got=${hash(grant).slice(0, 16)}`); return json(res, 401, { error: "Pairing link expired or already used." }); }
+			if (pairing.hash !== hash(grant)) { log(`remote pairing rejected: mismatch got=${hash(grant).slice(0, 16)} want=${pairing.hash.slice(0, 16)}`); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			pairing = null;
 			const token = secret();
 			const agent = req.headers["user-agent"] ?? "";
@@ -248,6 +249,8 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 						if (!origin) throw new Error("Enable remote access before pairing a device.");
 						const grant = secret();
 						pairing = { hash: hash(grant), expiresAt: now() + PAIR_TTL };
+						pairCount += 1;
+						log(`remote pairing minted (#${pairCount} slot=${pairing.hash.slice(0, 16)})`);
 						return { ...status(), pairingUrl: `${origin}/_lh/remote/pair#grant=${grant}`, pairingExpiresAt: pairing.expiresAt };
 					}
 					case "revoke":
