@@ -345,7 +345,7 @@ test("pairing rejections are logged with reasons and keep a generic client messa
 	// The real grant expired.
 	f.advance(5 * 60_000 + 1);
 	assert.equal((await post(grant)).status, 401);
-	const reasons = lines.filter((line) => line.startsWith("remote pairing rejected:")).map((line) => line.split(": ")[1]);
+	const reasons = lines.filter((line) => line.startsWith("remote pairing rejected:")).map((line) => line.split(": ").slice(1).join(": "));
 	assert.ok(reasons.includes("no-pending"), `expected no-pending in ${JSON.stringify(reasons)}`);
 	assert.ok(reasons.some((reason) => reason === "mismatch" || reason.startsWith("mismatch got=")), `expected mismatch in ${JSON.stringify(reasons)}`);
 	assert.ok(reasons.includes("expired"), `expected expired in ${JSON.stringify(reasons)}`);

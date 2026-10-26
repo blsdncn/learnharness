@@ -13,6 +13,12 @@ export function RemoteAccessSection() {
 	const [pairing, setPairing] = useState<{ url: string; expiresAt: number } | null>(null);
 	const [message, setMessage] = useState("");
 	const mounted = useRef(false);
+	// Request sequencing: concurrent pair/enable calls resolve in call
+	// order server-side, but their responses can arrive out of order (or a
+	// slow first response can land after a newer one). Only the latest
+	// request may publish status/pairing — otherwise the screen can show a
+	// superseded pairing link whose grant the server already replaced.
+	const seq = useRef(0);
 	useEffect(() => {
 		mounted.current = true;
 		const bridge = window.lh?.remote;
@@ -32,8 +38,9 @@ export function RemoteAccessSection() {
 		setBusy(true); setMessage("");
 		if (op === "disable") setPairing(null);
 		try {
+			const mine = ++seq.current;
 			const value = op === "revoke" ? await bridge.revoke(id!) : await bridge[op]();
-			if (!mounted.current) return;
+			if (!mounted.current || mine !== seq.current) return;
 			setStatus(value);
 			if (value.pairingUrl && value.pairingExpiresAt) setPairing({ url: value.pairingUrl, expiresAt: value.pairingExpiresAt });
 		} catch { if (mounted.current) setMessage("Remote access could not be changed. Try again."); }
