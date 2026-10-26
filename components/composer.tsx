@@ -2,6 +2,7 @@
 
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { revealDockOnFocus } from "@/components/focus-hygiene";
 import { Hint } from "@/components/ui/hint";
 
 /**
@@ -93,6 +94,7 @@ export function Composer({
 			<textarea
 				ref={inputRef}
 				value={value}
+				onFocus={revealDockOnFocus}
 				onChange={(e) => onChange(e.target.value)}
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean

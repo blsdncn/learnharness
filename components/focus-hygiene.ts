@@ -30,3 +30,23 @@ export function blurAfterPointerClick(e: {
 	const el = e.currentTarget as { blur?: unknown } | null;
 	if (el && typeof el.blur === "function") (el.blur as () => void).call(el);
 }
+
+/**
+ * PHONE KEYBOARD REVEAL (mobile round): attach as a dock textarea's
+ * onFocus. Opening the on-screen keyboard shrinks the visual viewport
+ * and the browser pans — without a nudge the dock (question + field)
+ * can strand above the visible area with the scroll machine snapping
+ * back every attempt to scroll up. `nearest` moves the smallest amount
+ * across every scrollable ancestor, so an already-visible dock doesn't
+ * jump. Node-safe duck-typing like above.
+ */
+export function revealDockOnFocus(e: {
+	currentTarget: EventTarget | null;
+}): void {
+	const el = e.currentTarget as { closest?: unknown } | null;
+	if (!el || typeof el.closest !== "function") return;
+	const dock = (el.closest as (sel: string) => unknown).call(el, '[data-testid="question-dock"],[data-testid="practice-dock"],[data-testid="composer"]');
+	const target = dock as { scrollIntoView?: unknown } | null;
+	if (target && typeof target.scrollIntoView === "function")
+		(target.scrollIntoView as (opts: { block: string }) => void).call(target, { block: "nearest" });
+}

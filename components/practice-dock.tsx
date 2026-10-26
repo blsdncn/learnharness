@@ -5,6 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { revealDockOnFocus } from "@/components/focus-hygiene";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { cn } from "@/lib/utils";
 
@@ -123,6 +124,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				</div>
 				<textarea
 					value={thinking}
+					onFocus={revealDockOnFocus}
 					onChange={(e) => {
 						thinkingRef.current = e.target.value;
 						setThinking(e.target.value);

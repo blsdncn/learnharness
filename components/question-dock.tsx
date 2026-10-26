@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { revealDockOnFocus } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
@@ -853,6 +854,7 @@ function QuestionDockForm({
 					{qd.mode === "text" ? (
 						<textarea
 							value={text}
+							onFocus={revealDockOnFocus}
 							onChange={(e) => {
 								answerTextRef.current = e.target.value;
 								setText(e.target.value);
@@ -882,6 +884,7 @@ function QuestionDockForm({
 						<textarea
 							ref={thinkingRef}
 							value={thinking}
+							onFocus={revealDockOnFocus}
 							onChange={(e) => {
 								thinkingTextRef.current = e.target.value;
 								setThinking(e.target.value);

@@ -113,7 +113,10 @@ export function StatsBar({
 			{/* The left side: the session-data summary — only once a session
 			    exists (turns). Pre-chat renders nothing (see the header). */}
 			{(chatId || turns.length > 0) && (
-			<div ref={barRef} className="relative">
+			// Phone compaction (mobile round): the usage summary hides
+			// below sm — the model pills stay. The popover detail rides
+			// with it; phones get one uncrowded row, desktops unchanged.
+			<div ref={barRef} className="relative max-sm:hidden">
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
 			<button

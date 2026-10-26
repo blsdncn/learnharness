@@ -2030,7 +2030,15 @@ function DockOverlay({
 		};
 		measure();
 		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
+		// Phone keyboards (mobile round): iOS does not shrink the layout
+		// viewport or fire window.resize when the keyboard opens — only
+		// visualViewport resizes. Without re-measuring, the question cap
+		// stays full-height, the dock flows under the keyboard, and the
+		// question strands out of reach. Sidebar's --lh-mobile-height
+		// handler already listens here; this keeps the cap in step.
+		const vv = window.visualViewport;
+		vv?.addEventListener("resize", measure);
+		return () => { window.removeEventListener("resize", measure); vv?.removeEventListener("resize", measure); };
 	}, [scrollRef]);
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
@@ -2274,7 +2282,7 @@ function DockOverlay({
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-[max(1.25rem,env(safe-area-inset-bottom))]" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
+			<div ref={blockRef} className="relative overflow-x-clip bg-background pb-[max(1.25rem,env(safe-area-inset-bottom))]" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
 				<div className={DOCK}>
 					{setupCta}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet

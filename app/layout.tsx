@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Sans_3 } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -16,6 +16,17 @@ const prose = Source_Sans_3({ subsets: ["latin"], variable: "--font-sans3" });
 export const metadata: Metadata = {
 	title: "Learning Harness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
+};
+
+// Phone keyboards (mobile round): where supported the layout viewport
+// itself shrinks above the keyboard instead of only the visual one, so
+// the scroller, the dock cap, and the focused field stay in one geometry
+// instead of the content stranding under the keyboard. Width/scale repeat
+// the framework defaults — only the widget behavior is added.
+export const viewport: Viewport = {
+	width: "device-width",
+	initialScale: 1,
+	interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
