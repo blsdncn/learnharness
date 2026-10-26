@@ -110,8 +110,10 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 	async function handle(req, res) {
 		res.setHeader("Referrer-Policy", "no-referrer");
 		res.setHeader("X-Frame-Options", "SAMEORIGIN");
-		if (!origin || req.headers.host !== new URL(origin).host || req.headers["x-forwarded-proto"] !== "https")
+		if (!origin || req.headers.host !== new URL(origin).host || req.headers["x-forwarded-proto"] !== "https") {
+			log(`remote rejected ingress (host=${JSON.stringify(req.headers.host)}, x-forwarded-proto=${JSON.stringify(req.headers["x-forwarded-proto"])})`);
 			return json(res, 403, { error: "Use the private Tailscale HTTPS address." });
+		}
 		if (!req.url?.startsWith("/") || req.url.startsWith("//") || /[\\\r\n]/.test(req.url)) return json(res, 400, { error: "Invalid request path." });
 		const url = new URL(req.url, origin);
 		if (url.pathname === "/_lh/remote/sw.js" && req.method === "GET") {
@@ -119,8 +121,10 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 			return res.end(remoteWorker);
 		}
 		const unsafe = !["GET", "HEAD"].includes(req.method);
-		if (unsafe && (req.headers.origin !== origin || (req.headers["sec-fetch-site"] && req.headers["sec-fetch-site"] !== "same-origin")))
+		if (unsafe && (req.headers.origin !== origin || (req.headers["sec-fetch-site"] && req.headers["sec-fetch-site"] !== "same-origin"))) {
+			log(`remote rejected unsafe request (method=${req.method}, path=${url.pathname}, origin=${JSON.stringify(req.headers.origin)}, sec-fetch-site=${JSON.stringify(req.headers["sec-fetch-site"])})`);
 			return json(res, 403, { error: "Cross-origin requests are not allowed." });
+		}
 		if (url.pathname === "/_lh/remote/pair" && req.method === "POST") {
 			if (now() - attemptWindow > 60_000) { attempts = 0; attemptWindow = now(); }
 			if (++attempts > 20) return json(res, 429, { error: "Try pairing again in a minute." });
