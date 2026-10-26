@@ -5,7 +5,7 @@
  * the gateway's forwarding headers (see isDirectDesktopCall). Phones keep
  * using pairing links; they can never mint them.
  */
-import { isDirectDesktopCall, requestRemotePair } from "@/src/server/remote-admin.ts";
+import { isDirectDesktopCall, requestRemotePair } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
