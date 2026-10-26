@@ -1,0 +1,12 @@
+# Local subscription-enabled build. Separate profile/identity; no upstream updates.
+extends: ./electron-builder.yml
+appId: com.learnharness.LearnHarness.Codex
+productName: LearnHarness Codex
+extraMetadata:
+  lhCodexBuild: true
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: "LearnHarness-Codex-${version}-${arch}.${ext}"

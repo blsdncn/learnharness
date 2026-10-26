@@ -6,7 +6,8 @@ import { piModels } from "../src/agent/models.ts";
 import { callCost, jobCost } from "../src/server/pricing.ts";
 import { accumulateJobUsage, piUsageToStep } from "../src/core/contracts/jobs.ts";
 
-const models = piModels().getProviders().flatMap((p) => piModels().getModels(p.id));
+// Subscription rates in the native catalog are not API-dollar charges.
+const models = piModels().getProviders().filter((p) => p.id !== "openai-codex").flatMap((p) => piModels().getModels(p.id));
 const nativeUsage = (input: number): Usage => ({ input, output: 1_000, cacheRead: 10_000, cacheWrite: 2_000, cacheWrite1h: 500, totalTokens: input + 13_000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 const saved = (u: Usage) => ({ inputTokens: u.input, outputTokens: u.output, cacheReadTokens: u.cacheRead, cacheWriteTokens: u.cacheWrite, cacheWrite1hTokens: u.cacheWrite1h, reasoningTokens: 500 });
 

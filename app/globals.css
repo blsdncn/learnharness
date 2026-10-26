@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+/* Phone browsers keep the app usable while their keyboard changes the visual
+ * viewport. Desktop Electron retains its existing window geometry. */
+@media (max-width: 767px) {
+	html:not(.lh-electron) .h-dvh { height: var(--lh-mobile-height, 100dvh); }
+	html:not(.lh-electron) .lh-sessions-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; height: var(--lh-mobile-height, 100dvh); }
+	html:not(.lh-electron) .lh-input,
+	html:not(.lh-electron) input:not([type="range"]):not([type="checkbox"]),
+	html:not(.lh-electron) textarea { font-size: 16px; }
+	html:not(.lh-electron) [data-testid="settings-dialog"] { max-height: calc(var(--lh-mobile-height, 100dvh) - 1rem); }
+}
+
+/* Narrow Electron windows (e.g. tiled half-screen) cannot always widen to
+ * the sidebar threshold, so the toggle opens the sidebar as a drawer
+ * instead of leaving the click with no visible effect. */
+html.lh-electron .lh-sessions-sidebar.lh-drawer-open {
+	position: fixed;
+	inset: 0 auto 0 0;
+	z-index: 40;
+	height: 100dvh;
+	box-shadow: 0 0 0 1px var(--border), 16px 0 48px rgb(0 0 0 / 0.45);
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /*

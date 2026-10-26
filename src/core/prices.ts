@@ -14,7 +14,7 @@ export interface SessionPricing {
 }
 
 export function isChatGPTPlan(model: string | undefined): boolean {
-	return model?.startsWith("chatgpt:") === true;
+	return model?.startsWith("chatgpt:") === true || model?.startsWith("openai-codex:") === true;
 }
 export function subscriptionLabel(model: string | undefined): string | undefined {
 	if (isChatGPTPlan(model)) return "ChatGPT";

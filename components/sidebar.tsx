@@ -48,12 +48,12 @@ const STORAGE_KEY = "lh:sidebar-open";
  *
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
-import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
+import type { ChatGPTControlBridge, CodexControlBridge, NativeSubscriptionControlBridge, RemoteAccessBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
-const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+const IS_ELECTRON = typeof window !== "undefined" && typeof window.lh?.expandWindow === "function" && navigator.userAgent.includes("Electron");
 
 declare global {
 	interface Window {
@@ -66,6 +66,8 @@ declare global {
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
+			codex?: CodexControlBridge;
+			remote?: RemoteAccessBridge;
 			expandWindow: () => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
@@ -81,8 +83,11 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{ open: boolean; mobile: boolean; drawer: boolean; close: () => void; toggle: () => void }>({
 	open: false,
+	mobile: false,
+	drawer: false,
+	close: () => {},
 	toggle: () => {},
 });
 
@@ -103,6 +108,35 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	const [mobile, setMobile] = useState(false);
+	// Narrow Electron overlay fallback: when a tiled window cannot widen,
+	// the sidebar opens as a drawer instead of staying hidden.
+	const [narrowOverlay, setNarrowOverlay] = useState(false);
+	const drawer = mobile || narrowOverlay;
+	const close = useCallback(() => {
+		if (narrowOverlay) {
+			localStorage.setItem(STORAGE_KEY, "0");
+			setNarrowOverlay(false);
+		}
+		setOpen(false);
+	}, [narrowOverlay]);
+	useEffect(() => {
+		if (IS_ELECTRON || typeof window.matchMedia !== "function") return;
+		const query = window.matchMedia("(max-width: 767px)");
+		const update = () => {
+			setMobile(query.matches);
+			setOpen(query.matches ? false : localStorage.getItem(STORAGE_KEY) !== "0");
+		};
+		update();
+		query.addEventListener("change", update);
+		const viewport = window.visualViewport;
+		const resize = () => {
+			if (viewport && viewport.scale === 1) document.documentElement.style.setProperty("--lh-mobile-height", `${viewport.height}px`);
+		};
+		resize();
+		viewport?.addEventListener("resize", resize);
+		return () => { query.removeEventListener("change", update); viewport?.removeEventListener("resize", resize); document.documentElement.style.removeProperty("--lh-mobile-height"); };
+	}, []);
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -127,7 +161,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 		const stored = localStorage.getItem(STORAGE_KEY);
 		// Default: open (first run introduces the sidebar).
-		setOpen(stored === null ? true : stored === "1");
+		setOpen(!IS_ELECTRON && window.matchMedia?.("(max-width: 767px)").matches ? false : stored === null ? true : stored === "1");
 		setMounted(true);
 		return () => off?.();
 	}, []);
@@ -144,23 +178,34 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	// The widen request succeeded: the drawer becomes the inline sidebar.
+	useEffect(() => {
+		if (!narrow) setNarrowOverlay(false);
+	}, [narrow]);
+
 	const toggle = useCallback(() => {
+		if (mobile) { setOpen((value) => !value); return; }
 		// Opening while narrow (auto-closed, or the user's own closed-at-
-		// narrow): ask the shell to widen to the threshold — the resize
-		// listener flips `narrow` and the sidebar appears. The preference
-		// persists like any other open, so a restart at a narrow width
-		// still auto-restores when widened.
+		// narrow): ask the shell to widen to the threshold and open as an
+		// overlay drawer immediately. If the window widens, the resize
+		// listener flips `narrow` and the drawer becomes inline; if the
+		// window is tiled and cannot widen, the drawer stays usable
+		// instead of the click appearing dead. The preference persists
+		// like any other open, so a restart at a narrow width still
+		// auto-restores when widened.
 		if (narrow && !open) {
-			localStorage.setItem(STORAGE_KEY, "0");
+			localStorage.setItem(STORAGE_KEY, "1");
 			setOpen(true);
+			setNarrowOverlay(true);
 			window.lh?.expandWindow();
 			return;
 		}
+		if (narrowOverlay) setNarrowOverlay(false);
 		setOpen((v) => {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [mobile, narrow, narrowOverlay, open]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -176,9 +221,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: open && (!narrow || narrowOverlay), mobile, drawer, close, toggle }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
-			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
+			<div className={cn("lh-app-frame flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
 	);
 }
@@ -387,7 +432,8 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
-	const { open, toggle } = useSidebar();
+	const { open, drawer, close, toggle } = useSidebar();
+	const asideRef = useRef<HTMLElement>(null);
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -400,6 +446,22 @@ function SessionsSidebar() {
 		window.localStorage.setItem(KIND_FILTER_KEY, f);
 	}, []);
 	const pathname = usePathname();
+	useEffect(() => { if (drawer) close(); }, [pathname, drawer, close]);
+	useEffect(() => {
+		if (!drawer || !open) return;
+		const previous = document.activeElement as HTMLElement | null;
+		const focusable = () => Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? []).filter((element) => element.getClientRects().length > 0);
+		focusable()[0]?.focus({ preventScroll: true });
+		const trap = (event: KeyboardEvent) => {
+			if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close(); }
+			if (event.key !== "Tab") return;
+			const elements = focusable(), first = elements[0], last = elements.at(-1);
+			if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+			else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+		};
+		document.addEventListener("keydown", trap, true);
+		return () => { document.removeEventListener("keydown", trap, true); previous?.focus({ preventScroll: true }); };
+	}, [drawer, open, close]);
 	const router = useRouter();
 	const { open: openSettings } = useSettingsDialog();
 
@@ -644,8 +706,13 @@ function SessionsSidebar() {
 
 	return (
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			ref={asideRef}
+			className={cn("lh-sessions-sidebar sidebar-motion shrink-0 overflow-hidden duration-200", drawer && open && "lh-drawer-open", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
+			inert={!open ? true : undefined}
+			role={drawer ? "dialog" : undefined}
+			aria-modal={drawer && open ? true : undefined}
+			aria-label={drawer ? "Sessions" : undefined}
 		>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
@@ -850,7 +917,7 @@ function SessionsSidebar() {
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
 								type="button"
-								onClick={() => openSettings()}
+								onClick={() => { if (drawer) close(); openSettings(); }}
 								data-testid="settings-entry"
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
@@ -941,10 +1008,12 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const { open, drawer, close } = useSidebar();
 	return (
 		<SettingsDialogProvider>
+			{drawer && open && <button type="button" aria-label="Close session menu" className="fixed inset-0 z-30 bg-background/80" onClick={close} />}
 			<SessionsSidebar />
-			<main className="min-w-0 flex-1">{children}</main>
+			<main className="min-w-0 flex-1" inert={drawer && open ? true : undefined}>{children}</main>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}

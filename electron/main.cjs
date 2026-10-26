@@ -26,11 +26,14 @@
 
 const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
+const { createCodex, codexFileStore, attachCodexChild, codexControl } = require("./codex.cjs");
+const { pathToFileURL } = require("node:url");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { createRemoteAccess } = require("./remote-access.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -42,7 +45,8 @@ const path = require("node:path");
 // renderer owns the number; this is the IPC widen target).
 const SIDEBAR_AUTOCLOSE = 928;
 
-const PRODUCT_NAME = "LearnHarness";
+const LOCAL_CODEX_BUILD = require("../package.json").lhCodexBuild === true;
+const PRODUCT_NAME = LOCAL_CODEX_BUILD ? "LearnHarness Codex" : "LearnHarness";
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -139,9 +143,12 @@ let chatgpt = null;
 let chatgptChild = null;
 let subscriptions = null;
 let subscriptionChild = null;
+let codex = null;
+let codexChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
 let reopenWindow = null;
+let remoteAccess = null;
 const trustedAppWindows = new Set();
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
@@ -229,6 +236,7 @@ function startServer(port) {
 		serverProcess = child;
 		chatgptChild = attachChatGPTChild(child, chatgpt);
 		subscriptionChild = attachSubscriptionChild(child, subscriptions);
+		codexChild = attachCodexChild(child, codex);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
@@ -241,6 +249,10 @@ function startServer(port) {
 			subscriptionChild = null;
 			chatgpt?.close();
 			subscriptions?.close();
+			codexChild?.dispose();
+			codexChild = null;
+			codex?.close();
+			void remoteAccess?.shutdown().catch(() => {});
 		});
 		resolve(child);
 	});
@@ -266,6 +278,7 @@ function waitUntilUp(url, tries = 150) {
 function killServer() {
 	chatgpt?.close();
 	subscriptions?.close();
+	codex?.close();
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -504,9 +517,10 @@ function installUpdateNow() {
 }
 
 function setupAutoUpdater() {
-	if (!app.isPackaged) {
-		log("auto-update: dev build — updater disabled");
-		reportUpdateStatus("disabled");
+	if (!app.isPackaged || typeof LOCAL_CODEX_BUILD !== "undefined" && LOCAL_CODEX_BUILD) {
+		log("auto-update: local build — updater disabled");
+		try { reportUpdateStatus("disabled"); } catch {}
+
 		return;
 	}
 	try {
@@ -635,12 +649,20 @@ async function main() {
 	app.on("window-all-closed", () => {
 		chatgpt?.pause();
 		subscriptions?.pause();
+		codex?.cancelLogin();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	let remoteShutdown = false;
+	app.on("before-quit", (event) => {
+		if (remoteAccess && !remoteShutdown) {
+			event.preventDefault();
+			remoteShutdown = true;
+			void remoteAccess.shutdown().catch(() => {}).finally(() => { killServer(); app.quit(); });
+		} else killServer();
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
@@ -676,17 +698,49 @@ async function main() {
 			},
 		});
 		await subscriptions.ready;
+		codex = createCodex({
+			store: codexFileStore(path.join(app.getPath("userData"), "codex-credentials.json")),
+			loadOAuth: async () => {
+				// Reuse the exact Pi version shipped in the standalone payload.
+				const entry = path.join(path.dirname(serverEntry()), "node_modules/@earendil-works/pi-ai/dist/providers/openai-codex.js");
+				const { openaiCodexProvider } = await import(pathToFileURL(entry).href);
+				return openaiCodexProvider().auth.oauth;
+			},
+			openExternal: (target) => shell.openExternal(target),
+			onChange: (value) => {
+				codexChild?.send(value);
+				for (const win of trustedAppWindows) win.webContents.send("lh:codex:changed");
+			},
+		});
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
+		try {
+			remoteAccess = createRemoteAccess({
+				upstream: url,
+				desktopSecret: desktopAPISecret,
+				statePath: path.join(app.getPath("userData"), "remote-access.json"),
+				onChange: () => {
+					for (const win of trustedAppWindows) if (!win.isDestroyed()) win.webContents.send("lh:remote:changed");
+				},
+			});
+			void remoteAccess.restore();
+		} catch { log("remote access settings are unavailable; local app remains available"); }
 	} else {
 		log(`dev mode: ${devUrl}`);
 	}
 
 	// Renderer controls contain no token/URL/code operation. The separate server
 	// child is the only recipient of credential leases over inherited IPC.
+	ipcMain.handle("lh:remote:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow))
+			return { available: false, enabled: false, url: null, devices: [], error: "Untrusted desktop request." };
+		if (!remoteAccess || !serverProcess?.connected)
+			return { available: false, enabled: false, url: null, devices: [], error: "Remote access requires the packaged desktop app's running server." };
+		return remoteAccess.control(command);
+	});
 	ipcMain.handle("lh:chatgpt:control", async (event, command) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
 		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
@@ -707,6 +761,14 @@ async function main() {
 	ipcMain.handle("lh:subscriptions:web-browser", async (event, action) => {
 		if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
 		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
+	});
+
+	ipcMain.handle("lh:codex:control", async (event, command) => {
+		let origin;
+		try { origin = new URL(url).origin; } catch { return { error: "Desktop origin is unavailable." }; }
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, origin, BrowserWindow)) return { error: "Untrusted desktop request." };
+		if (!codex || !serverProcess?.connected) return { available: false, pending: false, connected: false, manualCode: false, error: "Codex subscription sign-in requires the desktop app's private server connection." };
+		return codexControl(command, codex);
 	});
 
 	installMenu();
