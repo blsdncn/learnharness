@@ -13,6 +13,15 @@ div[role="log"] {
 	overflow-x: clip;
 }
 
+/* The message scroller is the log's first child (use-stick-to-bottom sets
+ * it to overflow:auto), so it scrolls sideways on its own — clipping the
+ * log above it does nothing. Measured offender: a pasted message with long
+ * URLs stretched it to 552px on a 393px phone. hidden, not clip: clip
+ * beside a scrolling axis computes to hidden anyway. */
+div[role="log"] > div {
+	overflow-x: hidden;
+}
+
 /* Phone browsers keep the app usable while their keyboard changes the visual
  * viewport. Desktop Electron retains its existing window geometry. */
 @media (max-width: 767px) {
@@ -227,6 +236,9 @@ body {
 	font-family: var(--font-prose);
 	font-size: var(--lh-prose-size);
 	line-height: var(--lh-prose-leading);
+	/* Long unbroken tokens (pasted URLs) wrap instead of widening the
+	   message column past a phone screen. */
+	overflow-wrap: break-word;
 }
 
 /* Session-name weight (owner, fix wave round 3): with the serif toggle

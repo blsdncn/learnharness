@@ -31,6 +31,12 @@ describe("mobile chat layout", () => {
 		assert.match(css, /div\[role="log"\]/, "the conversation scroller is guarded directly");
 	});
 
+	it("the inner message scroller and prose block sideways growth", () => {
+		const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+		assert.match(css, /div\[role="log"\] > div \{\s*overflow-x:\s*hidden/, "the overflow:auto scroller under the log must not pan");
+		assert.match(css, /\.lh-prose \{[^}]*overflow-wrap:\s*break-word/, "long pasted URLs wrap");
+	});
+
 	it("the stats usage summary hides below sm but stays in the markup", () => {
 		const html = renderToStaticMarkup(
 			<StatsBar chatId="fixture" turns={[turn()]} contextTokens={83_000} />,
