@@ -8,13 +8,20 @@ import { desktopAPIAuthorized } from "./desktop-access.ts";
  * shell spawns this server on loopback with a per-launch secret, and the
  * remote gateway proxies /api with that secret re-attached — so the secret
  * alone cannot tell laptop-local callers from paired phones. The Tailscale
- * gateway unconditionally stamps proxied requests with `x-forwarded-host`;
- * direct loopback callers never carry it. Minting requires a direct call.
+ * gateway unconditionally stamps proxied requests `x-forwarded-proto: https`
+ * (and Next.js synthesizes that header as `http` for direct plaintext
+ * loopback, so only an explicit non-http value proves proxying); direct
+ * loopback callers never carry it. Minting requires a direct call.
  * Revocation and disable stay laptop-UI-only; no remote surface changes.
  */
 export function isDirectDesktopCall(headers: Headers, env: Record<string, string | undefined> = process.env): boolean {
 	if (!desktopAPIAuthorized(headers, env)) return false;
-	if (headers.get("x-forwarded-host") || headers.get("forwarded")) return false;
+	if (headers.get("forwarded")) return false;
+	// Next.js synthesizes x-forwarded-proto on every request it serves, so
+	// absence also means direct: plaintext loopback reads "http" while the
+	// remote gateway stamps every proxied request "https" unconditionally.
+	const proto = headers.get("x-forwarded-proto");
+	if (proto && proto !== "http") return false;
 	return true;
 }
 

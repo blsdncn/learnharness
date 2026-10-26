@@ -56,7 +56,7 @@ describe("laptop-local mint guard", () => {
 		assert.equal(isDirectDesktopCall(headers(), ENV), true);
 		assert.equal(isDirectDesktopCall(new Headers(), ENV), false, "no capability");
 		assert.equal(
-			isDirectDesktopCall(headers({ "x-forwarded-host": "learn.test.ts.net:8443" }), ENV),
+			isDirectDesktopCall(headers({ "x-forwarded-proto": "https", "x-forwarded-host": "learn.test.ts.net:8443" }), ENV),
 			false,
 			"gateway-proxied callers (paired phones) can never mint",
 		);
