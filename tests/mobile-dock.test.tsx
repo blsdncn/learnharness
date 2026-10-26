@@ -1,15 +1,18 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseHTML } from "linkedom";
-import { Conversation } from "../components/ai-elements/conversation.tsx";
 import { StatsBar } from "../components/stats-bar.tsx";
 import { revealDockOnFocus } from "../components/focus-hygiene.ts";
 import type { TurnUsage } from "../src/core/contracts.ts";
 
 // Mobile round: the chat must never pan sideways (the plan marginalia
-// sits off-viewport on phones), the stats row compacts below sm, and
-// focusing a dock field nudges the dock into view for the keyboard.
+// sits off-viewport while invisible), the stats row compacts below sm,
+// and focusing a dock field nudges the dock into view for the keyboard.
+// The sideways guard lives as plain CSS in app/globals.css (the
+// overflow-x-clip utility never reached the shipped stylesheet), so the
+// test pins the stylesheet rule itself.
 
 function turn(): TurnUsage {
 	return {
@@ -22,9 +25,10 @@ function turn(): TurnUsage {
 }
 
 describe("mobile chat layout", () => {
-	it("the conversation scroller clips horizontal overflow", () => {
-		const html = renderToStaticMarkup(<Conversation>empty</Conversation>);
-		assert.match(html, /overflow-x-clip/, "wide children (marginalia, tables, math) must not pan the page");
+	it("the stylesheet carries a shipped sideways-pan guard", () => {
+		const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+		assert.match(css, /overflow-x:\s*clip/, "plain CSS, not a Tailwind utility");
+		assert.match(css, /div\[role="log"\]/, "the conversation scroller is guarded directly");
 	});
 
 	it("the stats usage summary hides below sm but stays in the markup", () => {

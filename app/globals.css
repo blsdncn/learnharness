@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* Sideways-pan guard (mobile round): nothing may widen the page past the
+ * viewport. Offenders so far: the plan marginalia, which sits ~200px
+ * off-viewport while faded to invisible (its plan diagram has real width
+ * once loaded), and wide message content that must stay inside its own
+ * scrollers. Plain CSS — the overflow-x-clip Tailwind utility did not
+ * survive into the shipped stylesheet (verified absent in 0.3.8 builds),
+ * so this rule carries the guarantee. clip (not hidden) preserves sticky
+ * positioning and inner horizontal scrollers (equations, code). */
+html, body,
+div[role="log"] {
+	overflow-x: clip;
+}
+
 /* Phone browsers keep the app usable while their keyboard changes the visual
  * viewport. Desktop Electron retains its existing window geometry. */
 @media (max-width: 767px) {
