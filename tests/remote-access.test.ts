@@ -347,7 +347,7 @@ test("pairing rejections are logged with reasons and keep a generic client messa
 	assert.equal((await post(grant)).status, 401);
 	const reasons = lines.filter((line) => line.startsWith("remote pairing rejected:")).map((line) => line.split(": ")[1]);
 	assert.ok(reasons.includes("no-pending"), `expected no-pending in ${JSON.stringify(reasons)}`);
-	assert.ok(reasons.includes("mismatch"), `expected mismatch in ${JSON.stringify(reasons)}`);
+	assert.ok(reasons.some((reason) => reason === "mismatch" || reason.startsWith("mismatch got=")), `expected mismatch in ${JSON.stringify(reasons)}`);
 	assert.ok(reasons.includes("expired"), `expected expired in ${JSON.stringify(reasons)}`);
 	assert.ok(lines.every((line) => !line.includes(grant ?? "impossible")), "grant material must never reach logs");
 });

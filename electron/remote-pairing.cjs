@@ -8,7 +8,8 @@ html{color-scheme:dark;font:16px/1.6 system-ui;background:#111412;color:#e4e8e2}
 </style></head><body><main><p>LEARNHARNESS · REMOTE ACCESS</p><h1>Connect this device</h1><p>Use the one-time pairing link from Settings → Remote Access on your laptop. Only pair a device you trust with your learning records and settings.</p><p id="message" role="status"></p><button id="connect" hidden>Pair this device</button></main><script nonce="${nonce}">
 let grant=null;
 const button=document.querySelector('#connect'),message=document.querySelector('#message');
-function receiveGrant(){const incoming=new URLSearchParams(location.hash.slice(1)).get('grant');history.replaceState(null,'','/_lh/remote/pair');if(incoming){grant=incoming;button.hidden=false;button.disabled=false;message.textContent='Ready to pair with your laptop.'}else if(!grant)message.textContent='Open a fresh pairing link from your laptop to continue.'}
+function tail(value){return value.slice(-6)}
+function receiveGrant(){const incoming=new URLSearchParams(location.hash.slice(1)).get('grant');history.replaceState(null,'','/_lh/remote/pair');if(incoming){grant=incoming;button.hidden=false;button.disabled=false;message.textContent='Ready to pair link ending …'+tail(incoming)+'. Tap Pair within a few minutes.'}else if(!grant)message.textContent='Open a fresh pairing link from your laptop to continue.'}
 receiveGrant();addEventListener('hashchange',receiveGrant);
 button.onclick=async()=>{button.disabled=true;try{
 if(!navigator.serviceWorker)throw new Error('Use Safari or Chrome with browser storage enabled to pair this device.');

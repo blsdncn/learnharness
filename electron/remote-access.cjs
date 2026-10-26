@@ -148,7 +148,7 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 			if (typeof grant !== "string" || grant.length !== 43) { log(`remote pairing rejected: bad-grant (length=${typeof grant === "string" ? grant.length : typeof grant})`); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			if (!pairing) { log("remote pairing rejected: no-pending"); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			if (pairing.expiresAt <= now()) { log("remote pairing rejected: expired"); return json(res, 401, { error: "Pairing link expired or already used." }); }
-			if (pairing.hash !== hash(grant)) { log("remote pairing rejected: mismatch"); return json(res, 401, { error: "Pairing link expired or already used." }); }
+			if (pairing.hash !== hash(grant)) { log(`remote pairing rejected: mismatch got=${hash(grant).slice(0, 16)}`); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			pairing = null;
 			const token = secret();
 			const agent = req.headers["user-agent"] ?? "";
