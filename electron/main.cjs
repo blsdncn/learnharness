@@ -31,6 +31,7 @@ const { pathToFileURL } = require("node:url");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
+const { attachRemoteChild } = require("./remote-child.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { createRemoteAccess } = require("./remote-access.cjs");
@@ -143,6 +144,7 @@ let chatgpt = null;
 let chatgptChild = null;
 let subscriptions = null;
 let subscriptionChild = null;
+let remoteChild = null;
 let codex = null;
 let codexChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
@@ -252,6 +254,8 @@ function startServer(port) {
 			codexChild?.dispose();
 			codexChild = null;
 			codex?.close();
+			remoteChild?.dispose();
+			remoteChild = null;
 			void remoteAccess?.shutdown().catch(() => {});
 		});
 		resolve(child);
@@ -728,6 +732,11 @@ async function main() {
 				},
 			});
 			void remoteAccess.restore();
+			// Laptop-local pairing relay for the desktop server child: the
+			// child mints links over inherited IPC on behalf of local
+			// callers holding the per-launch desktop secret. Paired phones
+			// can never reach it (relayed callers are refused server-side).
+			if (serverProcess?.connected) remoteChild = attachRemoteChild(serverProcess, remoteAccess);
 		} catch { log("remote access settings are unavailable; local app remains available"); }
 	} else {
 		log(`dev mode: ${devUrl}`);
