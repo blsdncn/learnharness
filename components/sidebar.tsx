@@ -113,13 +113,17 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	// the sidebar opens as a drawer instead of staying hidden.
 	const [narrowOverlay, setNarrowOverlay] = useState(false);
 	const drawer = mobile || narrowOverlay;
+	// Ref mirror of narrowOverlay: close() must stay identity-stable so
+	// effects keyed on navigation don't re-fire when the overlay flips.
+	const overlayRef = useRef(false);
 	const close = useCallback(() => {
-		if (narrowOverlay) {
-			localStorage.setItem(STORAGE_KEY, "0");
-			setNarrowOverlay(false);
+		if (overlayRef.current) {
+			overlayRef.current = false;
+			try { localStorage.setItem(STORAGE_KEY, "0"); } catch { /* private-mode write guard */ }
 		}
+		setNarrowOverlay(false);
 		setOpen(false);
-	}, [narrowOverlay]);
+	}, []);
 	useEffect(() => {
 		if (IS_ELECTRON || typeof window.matchMedia !== "function") return;
 		const query = window.matchMedia("(max-width: 767px)");
@@ -180,7 +184,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 	// The widen request succeeded: the drawer becomes the inline sidebar.
 	useEffect(() => {
-		if (!narrow) setNarrowOverlay(false);
+		if (!narrow) {
+			overlayRef.current = false;
+			setNarrowOverlay(false);
+		}
 	}, [narrow]);
 
 	const toggle = useCallback(() => {
@@ -196,11 +203,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		if (narrow && !open) {
 			localStorage.setItem(STORAGE_KEY, "1");
 			setOpen(true);
+			overlayRef.current = true;
 			setNarrowOverlay(true);
 			window.lh?.expandWindow();
 			return;
 		}
-		if (narrowOverlay) setNarrowOverlay(false);
+		if (narrowOverlay) {
+			overlayRef.current = false;
+			setNarrowOverlay(false);
+		}
 		setOpen((v) => {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
@@ -446,7 +457,20 @@ function SessionsSidebar() {
 		window.localStorage.setItem(KIND_FILTER_KEY, f);
 	}, []);
 	const pathname = usePathname();
-	useEffect(() => { if (drawer) close(); }, [pathname, drawer, close]);
+	// Dismiss the drawer on navigation only: keyed on the pathname via a
+	// ref (never on drawer/close identity), so opening the drawer cannot
+	// immediately dismiss itself.
+	const prevPathRef = useRef(pathname);
+	const drawerRef = useRef(drawer);
+	drawerRef.current = drawer;
+	const closeRef = useRef(close);
+	closeRef.current = close;
+	useEffect(() => {
+		if (prevPathRef.current !== pathname) {
+			prevPathRef.current = pathname;
+			if (drawerRef.current) closeRef.current();
+		}
+	}, [pathname]);
 	useEffect(() => {
 		if (!drawer || !open) return;
 		const previous = document.activeElement as HTMLElement | null;
