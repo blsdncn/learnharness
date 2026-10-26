@@ -3,7 +3,7 @@
 The packaged desktop app can serve its full existing web UI over Tailscale:
 sessions, teaching and practice, the knowledge graph, background activity,
 settings, and model selection all use the same running desktop backend.
-The laptop must remain awake with LearnHarness running. Codex subscription
+The laptop must remain awake with LearnHarness running. Subscription
 sign-in and credential refresh stay in the desktop process.
 
 ## Connect
@@ -152,7 +152,7 @@ directory flushes, both recovery paths failing, logout, and expiry after reload.
 Follow-up validation commands:
 
 ```sh
-NODE_ENV=test node --import tsx --test tests/remote-access.test.ts tests/desktop-api.test.ts tests/desktop-platform.test.ts tests/render-settings.test.tsx tests/codex-ui.test.tsx
+NODE_ENV=test node --import tsx --test tests/remote-access.test.ts tests/desktop-api.test.ts tests/desktop-platform.test.ts tests/render-settings.test.tsx
 npm run typecheck
 npm run lint
 npm run build

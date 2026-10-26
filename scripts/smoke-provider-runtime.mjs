@@ -126,24 +126,7 @@ async function probe(standalone) {
 			noNetwork();
 			console.log(`[smoke-provider-runtime] ${name}: public native OAuth and ${seenApis.size} transport APIs initialized offline`);
 		}
-		// Main imports Codex OAuth from this same payload. Exercise both lazy
-		// closures offline, so a packaged sign-in cannot fail on missing files.
-		const { openaiCodexProvider } = await import(new URL("providers/openai-codex.js", entry).href);
-		const codex = openaiCodexProvider();
-		const access = `fixture.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "offline-fixture" } })).toString("base64url")}.signature`;
-		assert.equal((await codex.auth.oauth.toAuth({ type: "oauth", access, refresh: "offline-refresh", expires: Date.now() + 3600000 })).apiKey, access);
-		const { streamSimple: codexStream } = await import(new URL("api/openai-codex-responses.js", entry).href);
-		let codexReached = 0;
-		const codexSentinel = `LH_OFFLINE_CODEX_${randomUUID()}`;
-		const codexResult = await codexStream(codex.getModels()[0], normalizeContext({ messages: [{ role: "user", content: "Offline initialization only", timestamp: 0 }] }), {
-			apiKey: access, transport: "sse",
-			onPayload() { codexReached++; throw new Error(codexSentinel); },
-		}).result();
-		assert.equal(codexReached, 1, codexResult.errorMessage);
-		assert.equal(codexResult.errorMessage, codexSentinel);
-		noNetwork();
-		console.log("[smoke-provider-runtime] Codex OAuth and native transport loaded; zero network attempts");
-		// Resolution/evaluation, not folder-exists checks. This also covers the
+				// Resolution/evaluation, not folder-exists checks. This also covers the
 		// previously missing transitive edge and permits legitimate nested deps.
 		for (const name of ["@google/genai", "google-auth-library", "gcp-metadata", "json-bigint", "bignumber.js"]) {
 			assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}${name.replaceAll("/", path.sep)}${path.sep}`)),

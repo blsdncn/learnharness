@@ -87,9 +87,6 @@ const nextConfig: NextConfig = {
 			// evaluates their real toAuth paths without login or provider requests.
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
-			// Main-process Codex login imports this lazy OAuth closure from the payload.
-			"node_modules/@earendil-works/pi-ai/dist/auth/**/*.js",
-			"node_modules/@earendil-works/pi-ai/dist/utils/oauth-page.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while
 			// traversing modules; **/data/**/* still prunes gcp-metadata and

@@ -2,7 +2,7 @@
 
 /**
  * Laptop-local pairing relay over the inherited Node child IPC (same
- * channel shape as chatgpt-ipc.cjs/codex.cjs — never a listening socket).
+ * channel shape as chatgpt-ipc.cjs — never a listening socket).
  *
  * Only `pair` is relayed: revocation and disable stay laptop-UI-only, and
  * minting stays laptop-local (see src/server/remote-admin.ts, which refuses

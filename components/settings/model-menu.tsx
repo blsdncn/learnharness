@@ -125,8 +125,8 @@ export function ModelMenuList({
 						>
 							<span className="flex items-center justify-between gap-2">
 								<span className="truncate text-card-foreground">{m.name}</span>
-								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) || m.provider === "openai-codex" ? "Subscription connection" : "USD per 1M tokens in/out"}>
-									{subscriptionLabel(`${m.provider}:${m.id}`) ?? (m.provider === "openai-codex" ? "ChatGPT plan" : priceLabel(m.cost))}
+								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
+									{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
 								</span>
 							</span>
 							<span className="flex items-center justify-between gap-2 text-muted-foreground">

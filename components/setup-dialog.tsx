@@ -46,7 +46,6 @@ import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
-import { CodexConnection } from "@/components/settings/codex-connection";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -213,7 +212,7 @@ export function SetupKeysBody({
 					</p>
 				)}
 			</div>
-			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /><CodexConnection /></div>
+			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /></div>
 		</div>
 	);
 }

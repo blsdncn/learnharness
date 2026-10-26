@@ -56,18 +56,6 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:remote:changed", listener);
 		},
 	},
-	codex: {
-		status: () => ipcRenderer.invoke("lh:codex:control", { op: "status" }),
-		login: () => ipcRenderer.invoke("lh:codex:control", { op: "login" }),
-		cancel: () => ipcRenderer.invoke("lh:codex:control", { op: "cancel" }),
-		submit: (value) => ipcRenderer.invoke("lh:codex:control", { op: "submit", value }),
-		disconnect: () => ipcRenderer.invoke("lh:codex:control", { op: "disconnect" }),
-		onChange: (cb) => {
-			const listener = () => cb();
-			ipcRenderer.on("lh:codex:changed", listener);
-			return () => ipcRenderer.removeListener("lh:codex:changed", listener);
-		},
-	},
 	chatgpt: {
 		status: () => ipcRenderer.invoke("lh:chatgpt:control", { op: "status" }),
 		login: (id) => ipcRenderer.invoke("lh:chatgpt:control", { op: "login", id }),

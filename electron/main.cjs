@@ -26,8 +26,6 @@
 
 const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
-const { createCodex, codexFileStore, attachCodexChild, codexControl } = require("./codex.cjs");
-const { pathToFileURL } = require("node:url");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
@@ -145,8 +143,6 @@ let chatgptChild = null;
 let subscriptions = null;
 let subscriptionChild = null;
 let remoteChild = null;
-let codex = null;
-let codexChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
 let reopenWindow = null;
@@ -238,7 +234,6 @@ function startServer(port) {
 		serverProcess = child;
 		chatgptChild = attachChatGPTChild(child, chatgpt);
 		subscriptionChild = attachSubscriptionChild(child, subscriptions);
-		codexChild = attachCodexChild(child, codex);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
@@ -251,9 +246,6 @@ function startServer(port) {
 			subscriptionChild = null;
 			chatgpt?.close();
 			subscriptions?.close();
-			codexChild?.dispose();
-			codexChild = null;
-			codex?.close();
 			remoteChild?.dispose();
 			remoteChild = null;
 			void remoteAccess?.shutdown().catch(() => {});
@@ -282,7 +274,6 @@ function waitUntilUp(url, tries = 150) {
 function killServer() {
 	chatgpt?.close();
 	subscriptions?.close();
-	codex?.close();
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -653,7 +644,6 @@ async function main() {
 	app.on("window-all-closed", () => {
 		chatgpt?.pause();
 		subscriptions?.pause();
-		codex?.cancelLogin();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
@@ -702,20 +692,6 @@ async function main() {
 			},
 		});
 		await subscriptions.ready;
-		codex = createCodex({
-			store: codexFileStore(path.join(app.getPath("userData"), "codex-credentials.json")),
-			loadOAuth: async () => {
-				// Reuse the exact Pi version shipped in the standalone payload.
-				const entry = path.join(path.dirname(serverEntry()), "node_modules/@earendil-works/pi-ai/dist/providers/openai-codex.js");
-				const { openaiCodexProvider } = await import(pathToFileURL(entry).href);
-				return openaiCodexProvider().auth.oauth;
-			},
-			openExternal: (target) => shell.openExternal(target),
-			onChange: (value) => {
-				codexChild?.send(value);
-				for (const win of trustedAppWindows) win.webContents.send("lh:codex:changed");
-			},
-		});
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
 		await startServer(new URL(url).port);
@@ -773,13 +749,6 @@ async function main() {
 		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
 	});
 
-	ipcMain.handle("lh:codex:control", async (event, command) => {
-		let origin;
-		try { origin = new URL(url).origin; } catch { return { error: "Desktop origin is unavailable." }; }
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, origin, BrowserWindow)) return { error: "Untrusted desktop request." };
-		if (!codex || !serverProcess?.connected) return { available: false, pending: false, connected: false, manualCode: false, error: "Codex subscription sign-in requires the desktop app's private server connection." };
-		return codexControl(command, codex);
-	});
 
 	installMenu();
 

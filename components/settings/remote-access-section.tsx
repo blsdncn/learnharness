@@ -52,7 +52,7 @@ export function RemoteAccessSection() {
 	}
 	return <SettingsSection title="Remote Access" testid="section-remote">
 		<p className="font-prose text-sm text-muted-foreground">Use the full app on your phone through your private Tailscale network. Your laptop must stay awake with LearnHarness running.</p>
-		{!status.available ? <p className="text-sm text-muted-foreground">Manage pairing and remote access in Settings → Remote Access on the laptop. Sign in to Codex on the laptop; connected models are available here.</p> : <>
+		{!status.available ? <p className="text-sm text-muted-foreground">Manage pairing and remote access in Settings → Remote Access on the laptop. Connect a provider on the laptop; connected models are available here.</p> : <>
 			<p className="text-xs text-muted-foreground">Connect both devices to Tailscale and enable HTTPS certificates in your tailnet. Each device must also be paired below.</p>
 			<div className="flex flex-wrap items-center gap-3">
 				<span role="status" className="font-ui text-xs">{status.enabled ? "Private access enabled" : "Remote access off"}</span>
