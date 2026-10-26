@@ -15,7 +15,7 @@ if(!navigator.serviceWorker)throw new Error('Use Safari or Chrome with browser s
 await navigator.serviceWorker.register('/_lh/remote/sw.js',{scope:'/'});
 const registration=await navigator.serviceWorker.ready;
 const response=await fetch('/_lh/remote/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant})});grant=null;
-if(!response.ok)throw new Error('This link expired or was already used. Create a new pairing link on your laptop.');
+if(!response.ok)throw new Error('This link expired or was already used (HTTP '+response.status+'). Create a new pairing link on your laptop.');
 const result=await response.json();
 await new Promise((resolve,reject)=>{const channel=new MessageChannel();const timeout=setTimeout(()=>reject(new Error('Browser storage is unavailable. Enable storage and try a fresh pairing link.')),10000);channel.port1.onmessage=(event)=>{clearTimeout(timeout);channel.port1.close();event.data.ok?resolve():reject(new Error('Pairing could not be saved in this browser.'))};registration.active.postMessage({type:'pair',token:result.token},[channel.port2])});
 location.replace('/')

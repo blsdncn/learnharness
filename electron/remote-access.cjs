@@ -16,7 +16,7 @@ const hopHeaders = ["connection", "keep-alive", "proxy-authenticate", "proxy-aut
 
 /** The only remote ingress. It shares the live desktop server, never opens
  * the desktop capability to renderers, and authenticates pages AND APIs. */
-function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = createTailscaleServe(), onChange = () => {}, now = Date.now, storage = fs }) {
+function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = createTailscaleServe(), onChange = () => {}, now = Date.now, storage = fs, log = () => {} }) {
 	const backend = new URL(upstream);
 	if (backend.hostname !== "127.0.0.1" || backend.protocol !== "http:" || !desktopSecret || desktopSecret.length < 64)
 		throw new Error("Remote access requires the desktop's private loopback backend.");
@@ -131,9 +131,13 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 				if (Buffer.byteLength(body) > 4096) return json(res, 413, { error: "Pairing request too large." });
 			}
 			let grant;
-			try { grant = JSON.parse(body).grant; } catch { return json(res, 400, { error: "Invalid pairing request." }); }
-			if (typeof grant !== "string" || grant.length !== 43 || !pairing || pairing.expiresAt <= now() || pairing.hash !== hash(grant))
-				return json(res, 401, { error: "Pairing link expired or already used." });
+			try { grant = JSON.parse(body).grant; } catch { log("remote pairing rejected: bad-json"); return json(res, 400, { error: "Invalid pairing request." }); }
+			// Reject reasons are logged server-side (no credential material):
+			// the client keeps one generic message so callers cannot probe slot state.
+			if (typeof grant !== "string" || grant.length !== 43) { log(`remote pairing rejected: bad-grant (length=${typeof grant === "string" ? grant.length : typeof grant})`); return json(res, 401, { error: "Pairing link expired or already used." }); }
+			if (!pairing) { log("remote pairing rejected: no-pending"); return json(res, 401, { error: "Pairing link expired or already used." }); }
+			if (pairing.expiresAt <= now()) { log("remote pairing rejected: expired"); return json(res, 401, { error: "Pairing link expired or already used." }); }
+			if (pairing.hash !== hash(grant)) { log("remote pairing rejected: mismatch"); return json(res, 401, { error: "Pairing link expired or already used." }); }
 			pairing = null;
 			const token = secret();
 			const agent = req.headers["user-agent"] ?? "";

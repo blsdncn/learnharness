@@ -722,6 +722,7 @@ async function main() {
 				upstream: url,
 				desktopSecret: desktopAPISecret,
 				statePath: path.join(app.getPath("userData"), "remote-access.json"),
+				log: (line) => log(line),
 				onChange: () => {
 					for (const win of trustedAppWindows) if (!win.isDestroyed()) win.webContents.send("lh:remote:changed");
 				},

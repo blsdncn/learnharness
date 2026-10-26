@@ -32,7 +32,7 @@ async function fixture(t: TestContext, storage = fs) {
 	let time = Date.now();
 	const statePath = join(directory, "remote-access.json");
 	const tailscale = { start: async (url: string) => { target = url; return origin; }, stop: async () => { stopped++; } };
-	const create = () => createRemoteAccess({ upstream: `http://127.0.0.1:${(backend.address() as import("node:net").AddressInfo).port}`, desktopSecret: capability, statePath, tailscale, now: () => time, storage });
+	const create = (extra = {}) => createRemoteAccess({ upstream: `http://127.0.0.1:${(backend.address() as import("node:net").AddressInfo).port}`, desktopSecret: capability, statePath, tailscale, now: () => time, storage, ...extra });
 	const remote = create();
 	t.after(async () => {
 		await remote.shutdown();
@@ -327,4 +327,27 @@ test("Tailscale Serve preserves other services and refuses public Funnel", async
 	(config as any).Web["learn.test.ts.net:8443"].Handlers["/other-app"] = { Proxy: "http://127.0.0.1:9999" };
 	await tailscale.stop();
 	assert.deepEqual(calls.at(-1), ["serve", "--https=8443", "--set-path=/", "off"]);
+});
+
+test("pairing rejections are logged with reasons and keep a generic client message", async (t) => {
+	const f = await fixture(t);
+	const lines: string[] = [];
+	const logged = f.create({ log: (line: string) => lines.push(String(line)) });
+	t.after(async () => { await logged.shutdown(); });
+	await logged.control({ op: "enable" });
+	const post = (grant: unknown) => f.request("/_lh/remote/pair", { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ grant }) });
+	// No pending pairing on a fresh controller.
+	assert.equal((await post("0".repeat(43))).status, 401);
+	const first = await logged.control({ op: "pair" });
+	const grant = new URLSearchParams(new URL(first.pairingUrl).hash.slice(1)).get("grant");
+	// Wrong grant while one is pending.
+	assert.equal((await post("1".repeat(43))).status, 401);
+	// The real grant expired.
+	f.advance(5 * 60_000 + 1);
+	assert.equal((await post(grant)).status, 401);
+	const reasons = lines.filter((line) => line.startsWith("remote pairing rejected:")).map((line) => line.split(": ")[1]);
+	assert.ok(reasons.includes("no-pending"), `expected no-pending in ${JSON.stringify(reasons)}`);
+	assert.ok(reasons.includes("mismatch"), `expected mismatch in ${JSON.stringify(reasons)}`);
+	assert.ok(reasons.includes("expired"), `expected expired in ${JSON.stringify(reasons)}`);
+	assert.ok(lines.every((line) => !line.includes(grant ?? "impossible")), "grant material must never reach logs");
 });
