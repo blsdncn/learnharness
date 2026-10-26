@@ -121,7 +121,14 @@ function createRemoteAccess({ upstream, desktopSecret, statePath, tailscale = cr
 			return res.end(remoteWorker);
 		}
 		const unsafe = !["GET", "HEAD"].includes(req.method);
-		if (unsafe && (req.headers.origin !== origin || (req.headers["sec-fetch-site"] && req.headers["sec-fetch-site"] !== "same-origin"))) {
+		const fetchSite = req.headers["sec-fetch-site"];
+		// Sandboxed webviews serialize an opaque origin as "null"; the
+		// browser-computed fetch metadata still certifies same-origin
+		// delivery. Only an explicit same-origin attestation excuses the
+		// opaque origin — missing metadata stays rejected, and cross-site
+		// posts stay rejected. Tailnet-only ingress is unchanged.
+		const opaqueSameOrigin = req.headers.origin === "null" && fetchSite === "same-origin";
+		if (unsafe && (req.headers.origin !== origin && !opaqueSameOrigin || (fetchSite && fetchSite !== "same-origin"))) {
 			log(`remote rejected unsafe request (method=${req.method}, path=${url.pathname}, origin=${JSON.stringify(req.headers.origin)}, sec-fetch-site=${JSON.stringify(req.headers["sec-fetch-site"])})`);
 			return json(res, 403, { error: "Cross-origin requests are not allowed." });
 		}

@@ -351,3 +351,21 @@ test("pairing rejections are logged with reasons and keep a generic client messa
 	assert.ok(reasons.includes("expired"), `expected expired in ${JSON.stringify(reasons)}`);
 	assert.ok(lines.every((line) => !line.includes(grant ?? "impossible")), "grant material must never reach logs");
 });
+
+test("sandboxed webviews pair when fetch metadata certifies same-origin delivery", async (t) => {
+	const f = await fixture(t);
+	await f.remote.control({ op: "enable" });
+	const opaque = { origin: "null", "sec-fetch-site": "same-origin", "content-type": "application/json", "user-agent": "iPhone" };
+	// Opaque origin without fetch-metadata attestation stays rejected.
+	const first = await f.remote.control({ op: "pair" });
+	const grant = (text: string) => new URLSearchParams(new URL(text).hash.slice(1)).get("grant");
+	assert.equal((await f.request("/_lh/remote/pair", { method: "POST", headers: { origin: "null", "content-type": "application/json" }, body: JSON.stringify({ grant: grant(first.pairingUrl) }) })).status, 403);
+	// Opaque origin with same-origin attestation pairs.
+	const second = await f.remote.control({ op: "pair" });
+	const response = await f.request("/_lh/remote/pair", { method: "POST", headers: opaque, body: JSON.stringify({ grant: grant(second.pairingUrl) }) });
+	assert.equal(response.status, 200);
+	assert.match(JSON.parse(response.body).token, /^[\w-]{43}$/);
+	// Cross-site metadata stays rejected even with a valid grant shape.
+	const third = await f.remote.control({ op: "pair" });
+	assert.equal((await f.request("/_lh/remote/pair", { method: "POST", headers: { ...opaque, "sec-fetch-site": "cross-site" }, body: JSON.stringify({ grant: grant(third.pairingUrl) }) })).status, 403);
+});
