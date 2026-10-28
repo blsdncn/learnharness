@@ -388,7 +388,7 @@ function QuestionDockForm({
 			doSubmit();
 			return;
 		}
-		void finishDictation().then(doSubmit);
+		void finishDictation().then((ok) => { if (ok) doSubmit(); });
 	};
 	const doSubmit = () => {
 		if (!canSubmit) return;
@@ -580,17 +580,17 @@ function QuestionDockForm({
 											: "Question"}
 					{qd.mode === "multi-select" && " · select all that apply"}
 				</div>
-				<div className="mb-3 font-medium">
+				<div className="mb-3 font-medium" data-listen-block="Question">
 					<ToolContentResponse>{qd.question}</ToolContentResponse>
 				</div>
 				{qd.context && (
-					<div className="mb-3 text-sm text-muted-foreground">
+					<div className="mb-3 text-sm text-muted-foreground" data-listen-block="Details">
 						<ToolContentResponse>{qd.context}</ToolContentResponse>
 					</div>
 				)}
 
 				{qd.mode !== "text" && (
-					<div className="flex flex-col gap-2 pb-2" role={qd.mode === "multi-select" ? "group" : "radiogroup"}>
+					<div className="flex flex-col gap-2 pb-2" role={qd.mode === "multi-select" ? "group" : "radiogroup"} data-listen-block="Options">
 						{qd.options.map((opt, i) => {
 							const isSel = sel.selected.has(i);
 							return (

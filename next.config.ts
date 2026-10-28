@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
+import { MAX_DICTATION_WAV_BYTES } from "./src/core/dictation.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
 const nextConfig: NextConfig = {
+	// Proxy buffering must accommodate a bounded WAV before route validation.
+	experimental: { proxyClientMaxBodySize: MAX_DICTATION_WAV_BYTES },
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
@@ -88,6 +91,14 @@ const nextConfig: NextConfig = {
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// Listen wave (2026-10-26): math speech's engine reads its locale
+			// data via a runtime path (lib/mathmaps/<locale>.json) the tracer
+			// cannot see. Only the two files the English setup loads.
+			"node_modules/speech-rule-engine/lib/mathmaps/{base,en}.json",
+			// SRE's webpack bundle resolves these via dynamic extRequire,
+			// which tracing misses. Cover both hoisted and nested installs.
+			"node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
+			"node_modules/speech-rule-engine/node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while
 			// traversing modules; **/data/**/* still prunes gcp-metadata and
 			// its private runtime chain. Includes are applied after traversal.
@@ -107,6 +118,7 @@ const nextConfig: NextConfig = {
 		"pdfjs-dist", // sources v0: bundling breaks its node fake-worker path
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@resvg/resvg-js", // native binding — same
+		"speech-rule-engine", // resolves its locale dir from its own __dirname
 	],
 };
 

@@ -93,6 +93,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Connection fields default to OpenAI and OPENAI_API_KEY; unset enabled = off. */
+	speech: FactorySettings["speech"] & { enabled: boolean | undefined };
+	dictation: FactorySettings["dictation"];
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -175,6 +178,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 	return {
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
+			dictationProvider: record?.general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider,
 		},
 		agent: {
 			models,
@@ -215,6 +219,18 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		speech: {
+			enabled: record?.speech?.enabled,
+			baseUrl: record?.speech?.baseUrl ?? FACTORY_SETTINGS.speech.baseUrl,
+			model: record?.speech?.model ?? FACTORY_SETTINGS.speech.model,
+			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
+			keySource: record?.speech?.keySource ?? FACTORY_SETTINGS.speech.keySource,
+		},
+		dictation: {
+			baseUrl: record?.dictation?.baseUrl ?? FACTORY_SETTINGS.dictation.baseUrl,
+			model: record?.dictation?.model ?? FACTORY_SETTINGS.dictation.model,
+			keySource: record?.dictation?.keySource ?? FACTORY_SETTINGS.dictation.keySource,
 		},
 	};
 }

@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	className,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,11 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** Local layout overrides; other settings keep the default row shape. */
+	className?: string;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40", className)}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -187,6 +190,8 @@ export function CommitInput({
 	ariaLabel,
 	testid,
 	type = "text",
+	wide,
+	className,
 }: {
 	/** "" = unset (the factory default). Mirrors the STORED record —
 	 *  after a clamped/normalized commit this flows back and the field
@@ -198,6 +203,9 @@ export function CommitInput({
 	ariaLabel: string;
 	testid?: string;
 	type?: "text" | "number";
+	/** Room for a URL instead of a short id. */
+	wide?: boolean;
+	className?: string;
 }) {
 	// The draft exists only while editing; a blur shows the record's value
 	// again — commit-on-blur/Enter (owner ruling), the field honest about
@@ -228,7 +236,11 @@ export function CommitInput({
 					e.currentTarget.blur();
 				}
 			}}
-			className="h-7 w-40 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
+			className={cn(
+				"h-7 min-w-0 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+				wide ? "w-64" : "w-40",
+				className,
+			)}
 		/>
 	);
 }

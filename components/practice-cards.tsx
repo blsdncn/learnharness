@@ -65,7 +65,7 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
 			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
-			<div className="lh-prose text-[15px]">
+			<div className="lh-prose text-[15px]" data-listen-block="Problem">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
 		</div>
@@ -132,7 +132,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			{/* The verdict — plain prose under the heading, no 'Verdict:' label
 			    (owner round 3): the same quiet 50% register as quiz explanations. */}
 			{verdict.length > 0 && (
-				<div className="text-sm text-foreground/50">
+				<div className="text-sm text-foreground/50" data-listen-block="Verdict">
 					<ToolContentResponse>{verdict}</ToolContentResponse>
 				</div>
 			)}
@@ -143,7 +143,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 					<div className="my-3 border-t" />
 					<div>
 						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
-						<div className="lh-prose text-[15px]">
+						<div className="lh-prose text-[15px]" data-listen-block="Model solution">
 							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
 					</div>
@@ -294,5 +294,5 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen listenLabel="Your thinking" />;
 }

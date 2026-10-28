@@ -46,3 +46,7 @@ export * from "./model-catalog.ts";
 export * from "./remote-admin.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
+// Speech (listen wave, 2026-10-26): OpenAI-compatible TTS behind /api/tts/openai.
+export * from "./speech.ts";
+export * from "./openai-dictation.ts";
+export * from "./audio-models.ts";

@@ -210,6 +210,34 @@ describe("Settings integration", () => {
 		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
 	});
 
+
+	it("separate TTS and Dictation menus preserve overlapping General edits", async () => {
+		bridge();
+		let record = { version: 1, general: { autoUpdate: true, dictationProvider: "deepgram" } };
+		const first = deferred<Response>();
+		const puts: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			if (String(input) === "/api/keys") return Response.json({ keys: [] });
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body)); puts.push(body);
+				if (puts.length === 1) return first.promise;
+				record = { ...record, general: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="dictation" onClose={() => {}} />);
+		assert.equal(q(host, "settings-nav-speech")!.textContent, "TTS");
+		assert.equal(q(host, "settings-nav-dictation")!.textContent, "Dictation");
+		const selector = q(host, "dictation-provider") as HTMLSelectElement;
+		await act(async () => { Object.defineProperty(selector, "value", { configurable: true, value: "openai" }); selector.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		await click(q(host, "settings-nav-general"));
+		await click(q(host, "toggle-auto-update"));
+		assert.equal(puts.length, 1, "the second edit waits for the first response");
+		await act(async () => { record = { ...record, general: puts[0] as typeof record.general }; first.resolve(Response.json({ settings: record })); });
+		assert.deepEqual(puts, [ { autoUpdate: true, dictationProvider: "openai" }, { autoUpdate: false, dictationProvider: "openai" } ]);
+	});
+
 	it("the shell's navigation request opens General, but opening alone never checks", async () => {
 		const b = bridge();
 		globalThis.fetch = async () => Response.json({ settings: { version: 1 } });

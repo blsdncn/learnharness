@@ -28,7 +28,8 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, DEFAULT_AUDIO_KEY_SOURCE, isAudioKeySource } from "./auth-keys.ts";
+import { DEFAULT_DICTATION_MODEL, OPENAI_DICTATION_BASE_URL, type DictationConnection, type DictationSettings } from "./dictation.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
@@ -233,6 +234,8 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** The explicit speech-to-text provider; connection settings live independently. */
+	dictationProvider?: "deepgram" | "openai";
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -356,6 +359,22 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/**
+ * Text-to-speech through an OpenAI-compatible `POST {baseUrl}/audio/speech`
+ * endpoint. Secrets stay in the key store; these settings contain only
+ * non-secret preferences. Unset connection fields use OpenAI defaults.
+ */
+export interface SpeechSettings {
+	/** Listening is opt-in: unset = off. */
+	enabled?: boolean;
+	/** A provider key's env var, or "custom" for TTS_API_KEY (see AudioKeySource). */
+	keySource?: string;
+	/** API root including the version segment, e.g. http://127.0.0.1:47616/v1. */
+	baseUrl?: string;
+	model?: string;
+	voice?: string;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -367,6 +386,8 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	speech?: SpeechSettings;
+	dictation?: DictationSettings;
 	[key: string]: unknown;
 }
 
@@ -392,11 +413,13 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	speech: Required<Omit<SpeechSettings, "enabled">>;
+	dictation: DictationConnection;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, dictationProvider: "deepgram" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -407,6 +430,8 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	speech: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy", keySource: DEFAULT_AUDIO_KEY_SOURCE },
+	dictation: { baseUrl: OPENAI_DICTATION_BASE_URL, model: DEFAULT_DICTATION_MODEL, keySource: DEFAULT_AUDIO_KEY_SOURCE },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -441,6 +466,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (raw.dictationProvider === "deepgram" || raw.dictationProvider === "openai") out.dictationProvider = raw.dictationProvider;
 	return out;
 }
 
@@ -600,6 +626,59 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** An http(s) URL normalized without its trailing slash (paths are
+ *  appended as `${baseUrl}/audio/speech`), or null when it isn't one.
+ *  Exported for the PUT parser's reject-with-rationale. */
+export function normalizeSpeechBaseUrl(value: string): string | null {
+	const trimmed = value.trim();
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return null;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+	if (url.username || url.password || url.search || url.hash) return null;
+	return url.toString().replace(/\/+$/, "");
+}
+
+/** Model and voice ids: trimmed, non-empty, bounded (ids, not prose). */
+export const SPEECH_ID_MAX = 200;
+
+function sanitizeSpeechId(raw: unknown): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	const value = raw.trim();
+	return value.length > 0 && value.length <= SPEECH_ID_MAX ? value : undefined;
+}
+
+function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
+	const out: SpeechSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	if (typeof raw.baseUrl === "string") {
+		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
+		if (baseUrl) out.baseUrl = baseUrl;
+	}
+	const model = sanitizeSpeechId(raw.model);
+	if (model) out.model = model;
+	const voice = sanitizeSpeechId(raw.voice);
+	if (voice) out.voice = voice;
+	if (isAudioKeySource(raw.keySource)) out.keySource = raw.keySource;
+	return out;
+}
+
+function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
+	const out: DictationSettings = {};
+	if (typeof raw.baseUrl === "string") {
+		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
+		if (baseUrl) out.baseUrl = baseUrl;
+	}
+	const model = sanitizeSpeechId(raw.model);
+	if (model) out.model = model;
+	if (isAudioKeySource(raw.keySource)) out.keySource = raw.keySource;
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -630,6 +709,12 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.speech !== null && typeof r.speech === "object" && !Array.isArray(r.speech)) {
+		out.speech = sanitizeSpeech(r.speech as Record<string, unknown>);
+	}
+	if (r.dictation !== null && typeof r.dictation === "object" && !Array.isArray(r.dictation)) {
+		out.dictation = sanitizeDictation(r.dictation as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

@@ -195,9 +195,12 @@ export function ThinkingMenuList({
 export function ProviderMenuList({
 	providers,
 	onPick,
+	detail,
 }: {
 	providers: { id: string; envVar: string; label: string }[];
 	onPick: (provider: { id: string; envVar: string; label: string }) => void;
+	/** The right-hand column; defaults to the env var name. */
+	detail?: (provider: { id: string; envVar: string; label: string }) => string;
 }) {
 	const [query, setQuery] = useState("");
 	const [menuIdx, setMenuIdx] = useState<number | null>(null);
@@ -267,7 +270,7 @@ export function ProviderMenuList({
 							}`}
 						>
 							<span className="truncate text-card-foreground">{p.label}</span>
-							<span className="shrink-0 font-mono text-[11px] text-muted-foreground">{p.envVar}</span>
+							<span className="shrink-0 font-mono text-[11px] text-muted-foreground">{detail ? detail(p) : p.envVar}</span>
 						</button>
 					</li>
 				))}

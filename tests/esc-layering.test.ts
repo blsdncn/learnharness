@@ -12,7 +12,7 @@ import { escAbortTarget } from "../components/chat.tsx";
  * pure) is the defense. Priority = stacking order.
  */
 describe("escAbortTarget (the layered-Esc ruling)", () => {
-	const none = { abortAsk: false, mermaidFocus: false, planOpen: false, setupOpen: false, pending: false, problem: false, busy: false };
+	const none = { abortAsk: false, mermaidFocus: false, planOpen: false, setupOpen: false, listening: false, pending: false, problem: false, busy: false };
 
 	it("no overlays: the 2026-10-02 chain stands (question before turn)", () => {
 		assert.equal(escAbortTarget({ ...none, pending: true }), "question");
@@ -48,5 +48,15 @@ describe("escAbortTarget (the layered-Esc ruling)", () => {
 
 	it("stacking order among overlays: mermaid paints above plan (later in DOM)", () => {
 		assert.equal(escAbortTarget({ ...none, mermaidFocus: true, planOpen: true, pending: true }), "mermaid");
+	});
+
+	it("listening (listen wave): Esc stops the audio before dismissing or aborting anything", () => {
+		assert.equal(escAbortTarget({ ...none, listening: true }), "listen");
+		for (const under of ["pending", "problem", "busy"] as const) {
+			assert.equal(escAbortTarget({ ...none, listening: true, [under]: true }), "listen", `listening outranks ${under}`);
+		}
+		for (const overlay of ["mermaidFocus", "planOpen", "setupOpen"] as const) {
+			assert.notEqual(escAbortTarget({ ...none, listening: true, [overlay]: true }), "listen", `${overlay} still closes first`);
+		}
 	});
 });

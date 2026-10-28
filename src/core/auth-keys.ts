@@ -37,6 +37,19 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{
+		id: "TTS_API_KEY",
+		label: "Text-to-speech",
+		description:
+			"Custom key for the text-to-speech endpoint, entered in Settings → TTS. Optional for servers that do not require authentication.",
+		docsUrl: "https://platform.openai.com/api-keys",
+	},
+	{
+		id: "STT_API_KEY",
+		label: "Dictation",
+		description: "Custom key for the OpenAI-compatible endpoint, entered in Settings → Dictation. Optional for keyless servers.",
+		docsUrl: "https://platform.openai.com/api-keys",
+	},
+	{
 		id: "TAVILY_API_KEY",
 		label: "Tavily",
 		description: "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed.",
@@ -132,6 +145,26 @@ export function isProviderEnvVar(envVar: string): boolean {
 	return AUTH_PROVIDER_ENV_VARS.has(envVar);
 }
 
+/**
+ * Which saved key an audio connection (TTS, OpenAI-compatible dictation)
+ * authenticates with: a model-provider key from Providers, referenced by
+ * its env var and never copied, or "custom" — that section's own inline
+ * key (TTS_API_KEY / STT_API_KEY), where an empty key means no auth.
+ */
+export type AudioKeySource = string;
+export const CUSTOM_AUDIO_KEY = "custom";
+export const DEFAULT_AUDIO_KEY_SOURCE: AudioKeySource = "OPENAI_API_KEY";
+
+export function isAudioKeySource(value: unknown): value is AudioKeySource {
+	return value === CUSTOM_AUDIO_KEY || (typeof value === "string" && AUTH_PROVIDER_ENV_VARS.has(value));
+}
+
+/** The stored key id a source reads: the provider's env var, or the
+ *  section's own custom key id. */
+export function audioKeyId(source: AudioKeySource, customId: string): string {
+	return source === CUSTOM_AUDIO_KEY ? customId : source;
+}
+
 /** Shape-check result: ok, or a 400-ready message naming the expectation. */
 export type KeyShapeResult = { ok: true } | { ok: false; error: string };
 
@@ -164,6 +197,11 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case "TTS_API_KEY":
+		case "STT_API_KEY":
+			// Any OpenAI-compatible server — no shared family; paste hygiene only
+			// (the model-provider floor).
+			return nonEmpty(12);
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

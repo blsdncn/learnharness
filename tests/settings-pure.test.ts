@@ -258,6 +258,14 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 		assert.ok(!out.toolRows[1]!.present);
 	});
 
+	it("the inline TTS / dictation custom keys never appear in Providers", () => {
+		for (const catalog of [providers, undefined]) {
+			const out = classifyKeys([synth("TTS_API_KEY", true), synth("STT_API_KEY", true)], catalog);
+			const ids = [...out.toolRows, ...out.providerRows, ...out.unknownRows].map((r) => r.id);
+			assert.ok(!ids.includes("TTS_API_KEY") && !ids.includes("STT_API_KEY"), String(ids));
+		}
+	});
+
 	it("unknown file vars surface read-only, out of the provider rows", () => {
 		const out = classifyKeys([synth("PLANS_LOGIN_TOKEN", true)], providers);
 		assert.equal(out.unknownRows.length, 1);

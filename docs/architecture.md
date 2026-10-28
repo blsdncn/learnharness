@@ -15,6 +15,64 @@ Status: **the canonical architecture spec** — describes the as-built system, v
 
 ---
 
+## Listening (2026-10-26)
+
+`src/core/speech.ts` defines the browser-safe speech request contract and
+text splitting. `src/server/speech.ts` resolves TTS settings and the
+selected credential, converts TeX to English with KaTeX and
+speech-rule-engine, and calls an OpenAI-compatible `/audio/speech`
+endpoint. `POST /api/tts/openai` streams MP3 audio to the client;
+`GET /api/tts/openai` reports activation and key presence without exposing
+credentials or probing the provider. Settings → TTS controls listening and
+edits the base URL (including its API version), model, and voice. The
+Model field is typeable; its list comes from `GET /api/tts/openai/models`
+(and `/api/stt/openai/models` for dictation), which calls the saved
+server's `/models` with the saved key source (`src/server/audio-models.ts`).
+`/models` carries no capability field, so every id is listed A–Z; a server
+without it still takes a typed id. No voice discovery is required.
+
+Audio keys (TTS and OpenAI-compatible dictation) share one rule,
+`keySource` in each settings section (`AudioKeySource`, core/auth-keys.ts):
+either a model-provider key name such as `OPENAI_API_KEY` (the default),
+referenced from Providers and never copied, or `"custom"` — the section's
+own `TTS_API_KEY` / `STT_API_KEY`, entered inline in
+`components/settings/audio-key-row.tsx` and not listed in Providers; an
+empty custom key sends no Authorization header. Any provider key may go to
+any configured URL (the explicit pick is the consent); a missing selected
+key refuses with 503 and never falls back to another key. Provider requests originate
+on the app server, so a remote phone can use a speech service on that
+server's loopback address.
+
+`components/listen/speech-dom.ts` identifies reading blocks within separate
+transcript and dock roots. Plan, reasoning, code blocks, and drawings are
+excluded. KaTeX source annotations supply TeX once per equation. A table
+reads row by row: the header row as-is, every other row with each cell
+under its column header.
+`listen-controller.ts` owns one audio element and a reading queue, prefetches
+the next block, and fences late responses after stop or restart. Playback
+speed is stored in browser localStorage. `listen.tsx` supplies one shared
+speaker, the current block highlight, and a player above the dock. Mouse
+input reveals the speaker on hover; touch input reveals it on a tap.
+Answered explain cards can queue the learner's answer followed by the
+committed answer with Compare. Practice statements and revealed solutions
+use the same block markers. Listening is opt-in: `speech.enabled` turns it
+on, including for keyless servers, and unset means off. Request cancellation stops upstream
+synthesis; provider error bodies are withheld because they may echo credentials.
+The server-only speech-rule-engine package and its locale data are
+included explicitly in standalone tracing through `next.config.ts`.
+
+`tests/speech-http.test.ts` exercises the route through an independent
+strict HTTP implementation of the OpenAI speech contract. It checks
+authentication, keyless requests, splitting, and cancellation without a
+fetch stub. `node --import tsx scripts/smoke-tts.mjs` is an opt-in live
+synthesis check using isolated temporary settings. `TTS_BASE_URL`,
+`TTS_MODEL`, and `TTS_VOICE` override OpenAI defaults; `TTS_KEY_SOURCE`
+selects a provider key (read from `<NAME>` or `<NAME>_FILE`), otherwise the
+custom `TTS_API_KEY` or `TTS_API_KEY_FILE` supplies optional authentication.
+`scripts/smoke-stt.mjs` is the dictation twin (`STT_*`), posting a WAV
+through `/api/stt/openai`. The probe keeps audio
+in memory and never edits the user's settings or credential store.
+
 ## 1. Two axes, one law
 
 Hold the architecture along two orthogonal axes:

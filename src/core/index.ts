@@ -81,3 +81,7 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// speech.ts (listen wave, 2026-10-26): the /api/tts/openai request contract and
+// spoken-text splitting. Pure, browser-safe.
+export * from "./speech.ts";
+export * from "./dictation.ts";

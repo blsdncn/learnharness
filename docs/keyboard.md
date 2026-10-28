@@ -30,10 +30,14 @@ second pillar of input).
   from typing surfaces; bare keys never do).
 - **Esc priority chain**: topmost popover → cheat sheet → cancel
   dictation (DISCARD — the transcript flush is Cmd+D/Stop only, owner
-  round) → abort turn (local stream only — a server-side wake turn has
+  round) → stop listening → abort turn (local stream only — a server-side wake turn has
   no client request to abort). Every element/document-level Esc handler
   that acts calls `e.stopPropagation()` so the window chain never
   double-fires. The session search claims Esc to blur back to normal.
+- **Listening**: Esc stops the current reading queue before the pending
+  question or turn abort action. The floating player also offers previous,
+  pause/resume, next, speed, and stop controls. On touch input, tap a reading
+  block to reveal its speaker; a swipe does not reveal it.
 - **Focus ring**: browser Tab-focus is gone, so `:focus-visible` stays
   unstyled (an earlier experimental outline was live-rejected — inputs
   showed a red ring on plain click-focus).

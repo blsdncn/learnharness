@@ -108,6 +108,8 @@ export function MenuShell({
 	preferredSide,
 	align = "right",
 	menuClass,
+	autoFocus = true,
+	remeasureKey,
 	children,
 }: {
 	anchorRef?: RefObject<HTMLElement | null>;
@@ -121,6 +123,11 @@ export function MenuShell({
 	/** The menu body classes: width, border, bg, padding, text — the
 	 *  shell adds position, z-index, the height cap, and scrolling. */
 	menuClass: string;
+	/** false: focus stays on the trigger (a combobox's own field). */
+	autoFocus?: boolean;
+	/** Changes when the content does after mount (a list that loads), so
+	 *  the side and cap are decided on the real height. */
+	remeasureKey?: string | number;
 	children: ReactNode;
 }) {
 	const menuRef = useRef<HTMLDivElement>(null);
@@ -143,13 +150,13 @@ export function MenuShell({
 	// fails (visibility: hidden subtrees are not focusable) — this seam is
 	// the one that actually lands.
 	useEffect(() => {
-		if (placed === null || focusedOnceRef.current) return;
+		if (!autoFocus || placed === null || focusedOnceRef.current) return;
 		focusedOnceRef.current = true;
 		const el = menuRef.current;
 		if (!el) return;
 		const input = el.querySelector<HTMLElement>("input");
 		(input ?? el).focus();
-	}, [placed]);
+	}, [placed, autoFocus]);
 
 	// The standard arrow machine for menus WITHOUT a search (owner: when a
 	// dropdown is expanded, the arrow keys cycle the options and never
@@ -219,7 +226,7 @@ export function MenuShell({
 			window.removeEventListener("scroll", rePlace, true);
 			window.removeEventListener("resize", rePlace);
 		};
-	}, [anchorRef, anchorTestid, preferredSide, align]);
+	}, [anchorRef, anchorTestid, preferredSide, align, remeasureKey]);
 
 	// First pass: mounted hidden at the viewport's top-left so the layout
 	// effect can measure the real content height before anything is seen.

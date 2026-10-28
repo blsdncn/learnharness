@@ -50,6 +50,12 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
 
+To listen to lesson text, enable Listening in Settings → Speech. Use OpenAI
+or another server that supports its `/audio/speech` API; set the API base
+URL, model, and voice there, and add its text-to-speech key in Providers
+when required. Playback speed can be changed while listening. The voice
+is synthesized by the configured service, and text is sent to that service.
+
 All three platforms support in-app updates.
 
 ## Your keys, your data

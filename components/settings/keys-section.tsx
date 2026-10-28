@@ -48,7 +48,17 @@ interface KeysResponse {
  *  these ids are the contract). Derived from the catalog (search wave,
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
-const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
+/** The custom audio keys are entered inline in Settings → TTS / Dictation
+ *  (their key rows), never listed here. */
+const INLINE_KEY_IDS: readonly string[] = ["TTS_API_KEY", "STT_API_KEY"];
+const TOOL_IDS = AUTH_KEYS.map((k) => k.id).filter((id) => !INLINE_KEY_IDS.includes(id)) as readonly string[];
+
+/** The tool keys' groups, in display order: dictation owns Deepgram;
+ *  everything else curated is a search engine. */
+const TOOL_GROUPS: readonly { label: string; testid: string; owns: (id: string) => boolean }[] = [
+	{ label: "Dictation", testid: "group-dictation", owns: (id) => id === "DEEPGRAM_API_KEY" },
+	{ label: "Search", testid: "group-search", owns: (id) => id !== "DEEPGRAM_API_KEY" },
+];
 
 /** The classification driving the table groups. Pure — exported for
  *  tests. OpenRouter is un-pinned (wave-5 owner ruling): no synthesis,
@@ -81,7 +91,7 @@ export function classifyKeys(
 	const providerRows: AuthKeyStatus[] = [];
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
-		if (isTool(s.id)) continue;
+		if (isTool(s.id) || INLINE_KEY_IDS.includes(s.id)) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -372,6 +382,22 @@ export function KeysSection({
 		if (initialRow !== undefined) setOpenRow(initialRow);
 	}, [initialRow]);
 
+	// A deep link to a provider key that isn't saved yet (the TTS /
+	// Dictation "Add in Providers" link) opens its Add paste field instead
+	// — once per link, after the catalog loads.
+	const seededAdd = useRef<string | null>(null);
+	useEffect(() => {
+		if (initialRow === undefined || statuses === null || providers === undefined) return;
+		if (seededAdd.current === initialRow) return;
+		seededAdd.current = initialRow;
+		if (statuses.some((s) => s.id === initialRow)) return;
+		const provider = providers.find((p) => p.envVar === initialRow);
+		if (!provider) return;
+		setOpenRow(null);
+		setAdding(provider);
+		setAddError(null);
+	}, [initialRow, statuses, providers]);
+
 	async function saveKey(id: string, value: string): Promise<string | null> {
 		const res = await fetch(`/api/keys/${id}`, {
 			method: "PUT",
@@ -459,8 +485,8 @@ export function KeysSection({
 				<SubscriptionConnections />
 			</SettingsGroup>
 
-			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
+			{TOOL_GROUPS.map(({ label, testid, owns }) => <SettingsGroup key={label} label={label} testid={testid}>
+				{toolRows.filter((status) => owns(status.id)).map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}

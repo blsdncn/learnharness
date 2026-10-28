@@ -50,10 +50,19 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			"node_modules/speech-rule-engine/lib/mathmaps/{base,en}.json",
+			"node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
+			"node_modules/speech-rule-engine/node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
 			"node_modules/gcp-metadata/**/*",
 			"node_modules/json-bigint/**/*",
 			"node_modules/bignumber.js/**/*",
 		]);
+	});
+	it("math speech ships exactly the English locale data it loads (listen wave)", () => {
+		const included = picomatch(nextConfig.outputFileTracingIncludes!["*"]!, { dot: true });
+		for (const file of ["base", "en"]) assert.equal(included(`node_modules/speech-rule-engine/lib/mathmaps/${file}.json`), true, file);
+		for (const file of ["de", "fr", "nemeth"]) assert.equal(included(`node_modules/speech-rule-engine/lib/mathmaps/${file}.json`), false, file);
+		assert.ok(nextConfig.serverExternalPackages!.includes("speech-rule-engine"), "loaded from node_modules, never bundled");
 	});
 	it("limits the workaround to its three packages, never learner data or unrelated dependencies", () => {
 		const closure = nextConfig.outputFileTracingIncludes!["*"]!.slice(-3);

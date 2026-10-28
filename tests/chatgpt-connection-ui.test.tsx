@@ -71,7 +71,7 @@ afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); 
 test("Providers is the first/default page; General is last and other pages keep relative order", () => {
  const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
  const ids = [...html.matchAll(/data-testid="settings-nav-([^"]+)"/g)].map((m) => m[1]);
- assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "remote", "general"]);
+ assert.deepEqual(ids, ["keys", "agent", "appearance", "speech", "dictation", "graph", "keyboard", "remote", "general"]);
  assert.match(html, /settings-nav-keys[^>]*aria-current="true"/); assert.match(html, />Providers<\/button>/);
  assert.doesNotMatch(html, />Model providers<\/button>/);
 });
@@ -85,6 +85,7 @@ test("Providers has exactly four ordered sections; unknown variables stay masked
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
  assert.deepEqual(headings, ["Model API keys", "Subscriptions", "Dictation", "Search"]);
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
+ assert.equal(document.querySelector('[data-testid="key-tts_api_key"], [data-testid="key-stt_api_key"]'), null, "custom audio keys are entered inline in TTS / Dictation");
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("unknown-FUTURE_VAR").closest('[data-testid="group-provider-keys"]'));
@@ -526,4 +527,14 @@ test("browser-only sign-in is disabled; foreground toolbar has no plan badge or 
  };
  fixture(connected(false)); await mount(<ModelControl />); assert.match(byTest("stats-model").textContent!, /gpt/i);
  assert(!document.body.textContent?.includes("Using ChatGPT plan")); assert(!document.body.textContent?.includes("Enable background use"));
+});
+
+test("a deep link to an unsaved provider key opens its Add paste field", async () => {
+ globalThis.fetch = async (url) => {
+  assert.equal(url, "/api/keys");
+  return Response.json({ providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }, { id: "groq", envVar: "GROQ_API_KEY", label: "Groq" }], keys: [{ id: "GROQ_API_KEY", info: null, present: true, masked: "…gq34 (56 chars)", source: "file", shadowedByEnv: false }] });
+ };
+ fixture(); await mount(<KeysSection initialRow="OPENAI_API_KEY" />);
+ assert(byTest("key-openai-editor"), "the OpenAI paste field is open");
+ assert(byTest("key-openai-input"));
 });
