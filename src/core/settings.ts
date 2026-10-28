@@ -29,10 +29,11 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS, DEFAULT_AUDIO_KEY_SOURCE, isAudioKeySource } from "./auth-keys.ts";
-import { DEFAULT_DICTATION_MODEL, OPENAI_DICTATION_BASE_URL, type DictationConnection, type DictationSettings } from "./dictation.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
+import { DEFAULT_DICTATION_MODEL, isDictationLanguage, OPENAI_DICTATION_BASE_URL, type DictationSettings } from "./dictation.ts";
+export type { DictationSettings };
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -380,6 +381,7 @@ export interface SpeechSettings {
 export interface UserSettings {
 	version: number;
 	general?: GeneralSettings;
+	dictation?: DictationSettings;
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
@@ -387,7 +389,6 @@ export interface UserSettings {
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
 	speech?: SpeechSettings;
-	dictation?: DictationSettings;
 	[key: string]: unknown;
 }
 
@@ -399,6 +400,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
+	dictation: Required<DictationSettings>;
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -414,12 +416,12 @@ export interface FactorySettings {
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
 	speech: Required<Omit<SpeechSettings, "enabled">>;
-	dictation: DictationConnection;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true, dictationProvider: "deepgram" },
+	dictation: { language: "en", baseUrl: OPENAI_DICTATION_BASE_URL, model: DEFAULT_DICTATION_MODEL, keySource: DEFAULT_AUDIO_KEY_SOURCE },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -431,7 +433,6 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
 	speech: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy", keySource: DEFAULT_AUDIO_KEY_SOURCE },
-	dictation: { baseUrl: OPENAI_DICTATION_BASE_URL, model: DEFAULT_DICTATION_MODEL, keySource: DEFAULT_AUDIO_KEY_SOURCE },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -669,6 +670,7 @@ function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
 
 function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
 	const out: DictationSettings = {};
+	if (isDictationLanguage(raw.language)) out.language = raw.language;
 	if (typeof raw.baseUrl === "string") {
 		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
 		if (baseUrl) out.baseUrl = baseUrl;
@@ -713,8 +715,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.speech !== null && typeof r.speech === "object" && !Array.isArray(r.speech)) {
 		out.speech = sanitizeSpeech(r.speech as Record<string, unknown>);
 	}
-	if (r.dictation !== null && typeof r.dictation === "object" && !Array.isArray(r.dictation)) {
-		out.dictation = sanitizeDictation(r.dictation as Record<string, unknown>);
+	if (r.dictation !== undefined) {
+		out.dictation = r.dictation !== null && typeof r.dictation === "object" && !Array.isArray(r.dictation)
+			? sanitizeDictation(r.dictation as Record<string, unknown>)
+			: {};
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

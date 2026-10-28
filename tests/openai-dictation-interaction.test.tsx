@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
 import { useDictation, type Dictation, OPENAI_DICTATION_KEYLESS } from "../components/dictation.tsx";
+import { notifySettingsSaved } from "../components/settings-signal.ts";
 
 (globalThis as Record<string, unknown>).React = React;
 
@@ -137,13 +138,15 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		assert.equal(micCalls, beforeMic, "missing key is detected before capturing audio");
 
 		connection = { baseUrl: "http://keyless.test/v1", model: "local-model", keySource: "custom" };
+		// Saves announce themselves; dictation reads the settled preference.
+		await act(async () => { notifySettingsSaved("dictation"); });
 		mode = "success";
 		await record();
 		provider = "deepgram";
+		await act(async () => { notifySettingsSaved("general"); });
 		await act(async () => { assert.equal(await current!.finish(), true); });
 		assert.equal(appended.at(-1), "Результат test", "a keyless custom recording finishes through its original provider");
 
-		provider = "deepgram";
 		await act(async () => current!.toggle());
 		assert.equal(current!.phase, "recording");
 		act(() => socket!.emit("message", { data: JSON.stringify({ type: "Results", is_final: true, channel: { alternatives: [{ transcript: "Deepgram text" }] } }) }));

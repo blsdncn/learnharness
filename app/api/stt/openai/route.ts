@@ -5,7 +5,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
 	const settings = effectiveSettings();
-	const connection = settings.dictation;
+	// The Deepgram language isn't part of the pinned connection.
+	const { language: _, ...connection } = settings.dictation;
 	const snapshot = request.headers.get("x-lh-dictation-connection");
 	if (snapshot && snapshot !== JSON.stringify(connection)) {
 		return Response.json({ message: "Dictation connection changed. Restore its settings to retry, or discard this recording." }, { status: 409 });

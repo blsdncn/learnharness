@@ -7,12 +7,12 @@ import { parseDictationSettingsBody } from "../src/server/settings-body.ts";
 it("defaults to Deepgram and the current OpenAI transcription model without sharing TTS settings", () => {
 	const resolved = resolveSettings({ version: 1, speech: { baseUrl: "http://tts.test/v1", model: "tts-model" } });
 	assert.equal(resolved.general.dictationProvider, "deepgram");
-	assert.deepEqual(resolved.dictation, { baseUrl: "https://api.openai.com/v1", model: "gpt-transcribe", keySource: "OPENAI_API_KEY" });
+	assert.deepEqual(resolved.dictation, { language: "en", baseUrl: "https://api.openai.com/v1", model: "gpt-transcribe", keySource: "OPENAI_API_KEY" });
 });
 
 it("any saved provider key may be selected for any endpoint — the explicit pick is the consent", () => {
 	const resolved = resolveSettings(sanitizeUserSettings({ version: 1, dictation: { baseUrl: "http://local.test/v1/", model: "custom", keySource: "GROQ_API_KEY" } }));
-	assert.deepEqual(resolved.dictation, { baseUrl: "http://local.test/v1", model: "custom", keySource: "GROQ_API_KEY" });
+	assert.deepEqual(resolved.dictation, { language: "en", baseUrl: "http://local.test/v1", model: "custom", keySource: "GROQ_API_KEY" });
 	assert.deepEqual(parseDictationSettingsBody({ baseUrl: "http://local.test/v1", keySource: "OPENAI_API_KEY" }), {
 		ok: true, settings: { baseUrl: "http://local.test/v1", keySource: "OPENAI_API_KEY" },
 	});

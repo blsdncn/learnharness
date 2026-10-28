@@ -35,6 +35,7 @@ import {
 	type BackgroundModelRole,
 	type FactorySettings,
 	type GeneralSettings,
+	type DictationSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type ModelSlot,
@@ -69,6 +70,7 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
+	dictation: Required<DictationSettings>;
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
@@ -95,7 +97,6 @@ export interface EffectiveSettings {
 	compaction: Required<CompactionSettings>;
 	/** Connection fields default to OpenAI and OPENAI_API_KEY; unset enabled = off. */
 	speech: FactorySettings["speech"] & { enabled: boolean | undefined };
-	dictation: FactorySettings["dictation"];
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -180,6 +181,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
 			dictationProvider: record?.general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider,
 		},
+		dictation: {
+			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+			baseUrl: record?.dictation?.baseUrl ?? FACTORY_SETTINGS.dictation.baseUrl,
+			model: record?.dictation?.model ?? FACTORY_SETTINGS.dictation.model,
+			keySource: record?.dictation?.keySource ?? FACTORY_SETTINGS.dictation.keySource,
+		},
 		agent: {
 			models,
 			tools: agent.tools ?? {},
@@ -226,11 +233,6 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			model: record?.speech?.model ?? FACTORY_SETTINGS.speech.model,
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
 			keySource: record?.speech?.keySource ?? FACTORY_SETTINGS.speech.keySource,
-		},
-		dictation: {
-			baseUrl: record?.dictation?.baseUrl ?? FACTORY_SETTINGS.dictation.baseUrl,
-			model: record?.dictation?.model ?? FACTORY_SETTINGS.dictation.model,
-			keySource: record?.dictation?.keySource ?? FACTORY_SETTINGS.dictation.keySource,
 		},
 	};
 }

@@ -19,6 +19,7 @@ import type {
 	BackgroundModelRole,
 	CompactionSettings,
 	GeneralSettings,
+	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
@@ -34,6 +35,7 @@ import {
 } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isAudioKeySource } from "../core/auth-keys.ts";
+import { isDictationLanguage } from "../core/dictation.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -425,14 +427,19 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
-export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<import("../core/dictation.ts").DictationSettings> {
+export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	// Same connection rules as speech; any provider key may go to any URL —
 	// picking it in the key row is the consent.
 	const connection = parseSpeechSettingsBody({ baseUrl: raw.baseUrl, model: raw.model, keySource: raw.keySource });
 	if (!connection.ok) return connection;
-	return { ok: true, settings: connection.settings };
+	const settings: DictationSettings = connection.settings;
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	return { ok: true, settings };
 }
 
 export const SETTINGS_SECTIONS = {
