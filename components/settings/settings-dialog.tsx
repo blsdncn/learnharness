@@ -33,6 +33,8 @@ import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import {
 	CURRENT_SETTINGS_VERSION,
+	DEFAULT_DICTATION_MODEL,
+	STT_KEY_ID,
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
@@ -46,13 +48,15 @@ import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
+import { useDictationLanguage } from "@/components/dictation-preference";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { SpeechSection } from "./speech-section.tsx";
-import { DictationSection } from "./dictation-section.tsx";
+import { DictationProviderRow } from "./dictation-provider.tsx";
+import { AudioEndpoint } from "./audio-endpoint.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { RemoteAccessSection } from "./remote-access-section.tsx";
@@ -65,7 +69,6 @@ const SECTIONS = [
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "speech", label: "TTS" },
-	{ id: "dictation", label: "Dictation" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "remote", label: "Remote Access" },
@@ -155,6 +158,7 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const { language: dictationLanguage } = useDictationLanguage();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -432,7 +436,30 @@ export function SettingsDialogBody({
 							)}
 							{active === "keys" && (
 								<SettingsSection title="Providers" testid="section-keys">
-									<KeysSection initialRow={keysRow ?? undefined} />
+									<KeysSection
+										initialRow={keysRow ?? undefined}
+										dictation={{
+											provider: (
+												<DictationProviderRow
+													provider={record.general?.dictationProvider ?? "deepgram"}
+													onChange={(dictationProvider) => void write("general", (current) => ({ ...current, dictationProvider }))}
+												/>
+											),
+											openai: record.general?.dictationProvider === "openai" ? (
+												<AudioEndpoint
+													settings={record.dictation}
+													defaultModel={DEFAULT_DICTATION_MODEL}
+													customKeyId={STT_KEY_ID}
+													// The language picker saves this section outside the
+													// dialog's record: carry its confirmed choice along.
+													onChange={(patch) => void write("dictation", (current) => ({ ...current, ...(dictationLanguage ? { language: dictationLanguage } : {}), ...patch }))}
+													onOpenKey={(id) => setKeysRow(id)}
+													testid="dictation-endpoint"
+													openAIKeyLine={false}
+												/>
+											) : undefined,
+										}}
+									/>
 								</SettingsSection>
 							)}
 							{active === "agent" && (
@@ -475,17 +502,6 @@ export function SettingsDialogBody({
 									<SpeechSection
 										speech={record.speech}
 										onSectionChange={(next: SpeechSettings) => void write("speech", next)}
-										onOpenKey={(id) => { setKeysRow(id); setActive("keys"); }}
-									/>
-								</SettingsSection>
-							)}
-							{active === "dictation" && (
-								<SettingsSection title="Dictation" testid="section-dictation">
-									<DictationSection
-										provider={record.general?.dictationProvider ?? "deepgram"}
-										dictation={record.dictation}
-										onProviderChange={(dictationProvider) => write("general", (current) => ({ ...current, dictationProvider }))}
-										onConnectionChange={(patch) => write("dictation", (current) => ({ ...current, ...patch }))}
 										onOpenKey={(id) => { setKeysRow(id); setActive("keys"); }}
 									/>
 								</SettingsSection>

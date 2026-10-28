@@ -28,11 +28,12 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { AUTH_PROVIDER_KEYS, DEFAULT_AUDIO_KEY_SOURCE, isAudioKeySource } from "./auth-keys.ts";
+import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
-import { DEFAULT_DICTATION_MODEL, isDictationLanguage, OPENAI_DICTATION_BASE_URL, type DictationSettings } from "./dictation.ts";
+import { isDictationLanguage, type DictationLanguage, type DictationSettings } from "./dictation.ts";
+import type { AudioEndpointSettings } from "./audio-connection.ts";
 export type { DictationSettings };
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -361,18 +362,14 @@ export interface CompactionSettings {
 }
 
 /**
- * Text-to-speech through an OpenAI-compatible `POST {baseUrl}/audio/speech`
- * endpoint. Secrets stay in the key store; these settings contain only
- * non-secret preferences. Unset connection fields use OpenAI defaults.
+ * Text-to-speech through `POST {baseUrl}/audio/speech`: OpenAI by default,
+ * or a custom OpenAI-compatible endpoint (see core/audio-connection.ts).
+ * Secrets stay in the key store; these settings contain only non-secret
+ * preferences.
  */
-export interface SpeechSettings {
+export interface SpeechSettings extends AudioEndpointSettings {
 	/** Listening is opt-in: unset = off. */
 	enabled?: boolean;
-	/** A provider key's env var, or "custom" for TTS_API_KEY (see AudioKeySource). */
-	keySource?: string;
-	/** API root including the version segment, e.g. http://127.0.0.1:47616/v1. */
-	baseUrl?: string;
-	model?: string;
 	voice?: string;
 }
 
@@ -400,7 +397,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	dictation: { language: DictationLanguage };
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -415,13 +412,13 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
-	speech: Required<Omit<SpeechSettings, "enabled">>;
+	speech: { voice: string };
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true, dictationProvider: "deepgram" },
-	dictation: { language: "en", baseUrl: OPENAI_DICTATION_BASE_URL, model: DEFAULT_DICTATION_MODEL, keySource: DEFAULT_AUDIO_KEY_SOURCE },
+	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -432,7 +429,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
-	speech: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy", keySource: DEFAULT_AUDIO_KEY_SOURCE },
+	speech: { voice: "alloy" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -652,33 +649,32 @@ function sanitizeSpeechId(raw: unknown): string | undefined {
 	return value.length > 0 && value.length <= SPEECH_ID_MAX ? value : undefined;
 }
 
-function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
-	const out: SpeechSettings = {};
-	const enabled = boolOrDrop(raw.enabled);
-	if (enabled !== undefined) out.enabled = enabled;
+function sanitizeAudioEndpoint(raw: Record<string, unknown>): AudioEndpointSettings {
+	const out: AudioEndpointSettings = {};
+	const customEndpoint = boolOrDrop(raw.customEndpoint);
+	if (customEndpoint !== undefined) out.customEndpoint = customEndpoint;
 	if (typeof raw.baseUrl === "string") {
 		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
 		if (baseUrl) out.baseUrl = baseUrl;
 	}
 	const model = sanitizeSpeechId(raw.model);
 	if (model) out.model = model;
+	return out;
+}
+
+function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
+	const out: SpeechSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
 	const voice = sanitizeSpeechId(raw.voice);
 	if (voice) out.voice = voice;
-	if (isAudioKeySource(raw.keySource)) out.keySource = raw.keySource;
-	return out;
+	return { ...out, ...sanitizeAudioEndpoint(raw) };
 }
 
 function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
 	const out: DictationSettings = {};
 	if (isDictationLanguage(raw.language)) out.language = raw.language;
-	if (typeof raw.baseUrl === "string") {
-		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
-		if (baseUrl) out.baseUrl = baseUrl;
-	}
-	const model = sanitizeSpeechId(raw.model);
-	if (model) out.model = model;
-	if (isAudioKeySource(raw.keySource)) out.keySource = raw.keySource;
-	return out;
+	return { ...out, ...sanitizeAudioEndpoint(raw) };
 }
 
 /**

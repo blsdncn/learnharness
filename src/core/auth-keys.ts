@@ -40,13 +40,13 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		id: "TTS_API_KEY",
 		label: "Text-to-speech",
 		description:
-			"Custom key for the text-to-speech endpoint, entered in Settings → TTS. Optional for servers that do not require authentication.",
+			"Key for a custom text-to-speech endpoint, entered in Settings → TTS → Advanced. Optional for servers that do not require authentication.",
 		docsUrl: "https://platform.openai.com/api-keys",
 	},
 	{
 		id: "STT_API_KEY",
 		label: "Dictation",
-		description: "Custom key for the OpenAI-compatible endpoint, entered in Settings → Dictation. Optional for keyless servers.",
+		description: "Key for a custom dictation endpoint, entered in Providers → Dictation → Advanced. Optional for keyless servers.",
 		docsUrl: "https://platform.openai.com/api-keys",
 	},
 	{
@@ -143,26 +143,6 @@ export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER
 /** Is this env-var name the key of SOME pi-ai model provider? */
 export function isProviderEnvVar(envVar: string): boolean {
 	return AUTH_PROVIDER_ENV_VARS.has(envVar);
-}
-
-/**
- * Which saved key an audio connection (TTS, OpenAI-compatible dictation)
- * authenticates with: a model-provider key from Providers, referenced by
- * its env var and never copied, or "custom" — that section's own inline
- * key (TTS_API_KEY / STT_API_KEY), where an empty key means no auth.
- */
-export type AudioKeySource = string;
-export const CUSTOM_AUDIO_KEY = "custom";
-export const DEFAULT_AUDIO_KEY_SOURCE: AudioKeySource = "OPENAI_API_KEY";
-
-export function isAudioKeySource(value: unknown): value is AudioKeySource {
-	return value === CUSTOM_AUDIO_KEY || (typeof value === "string" && AUTH_PROVIDER_ENV_VARS.has(value));
-}
-
-/** The stored key id a source reads: the provider's env var, or the
- *  section's own custom key id. */
-export function audioKeyId(source: AudioKeySource, customId: string): string {
-	return source === CUSTOM_AUDIO_KEY ? customId : source;
 }
 
 /** Shape-check result: ok, or a 400-ready message naming the expectation. */

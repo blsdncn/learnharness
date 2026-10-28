@@ -211,7 +211,7 @@ describe("Settings integration", () => {
 	});
 
 
-	it("separate TTS and Dictation menus preserve overlapping General edits", async () => {
+	it("the dictation provider (in Providers) and General edits never clobber each other", async () => {
 		bridge();
 		let record = { version: 1, general: { autoUpdate: true, dictationProvider: "deepgram" } };
 		const first = deferred<Response>();
@@ -226,9 +226,10 @@ describe("Settings integration", () => {
 			}
 			return Response.json({ settings: record });
 		};
-		const host = await mount(<SettingsDialogBody initialSection="dictation" onClose={() => {}} />);
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
 		assert.equal(q(host, "settings-nav-speech")!.textContent, "TTS");
-		assert.equal(q(host, "settings-nav-dictation")!.textContent, "Dictation");
+		assert.equal(q(host, "settings-nav-dictation"), null, "dictation lives in Providers");
+		assert.ok(q(host, "group-dictation")!.contains(q(host, "dictation-provider")));
 		const selector = q(host, "dictation-provider") as HTMLSelectElement;
 		await act(async () => { Object.defineProperty(selector, "value", { configurable: true, value: "openai" }); selector.dispatchEvent(new window.Event("change", { bubbles: true })); });
 		await click(q(host, "settings-nav-general"));
@@ -236,6 +237,43 @@ describe("Settings integration", () => {
 		assert.equal(puts.length, 1, "the second edit waits for the first response");
 		await act(async () => { record = { ...record, general: puts[0] as typeof record.general }; first.resolve(Response.json({ settings: record })); });
 		assert.deepEqual(puts, [ { autoUpdate: true, dictationProvider: "openai" }, { autoUpdate: false, dictationProvider: "openai" } ]);
+	});
+
+	it("Providers → Dictation: OpenAI's custom endpoint keeps the language and the section's other fields", async () => {
+		bridge();
+		let record: Record<string, unknown> = { version: 1, general: { dictationProvider: "deepgram" }, dictation: { language: "pl", baseUrl: "http://old.test/v1" } };
+		const puts: [string, unknown][] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [], providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }] });
+			if (init?.method === "PUT") {
+				const section = url.replace("/api/settings/", "");
+				const body = JSON.parse(String(init.body)); puts.push([section, body]);
+				record = { ...record, [section]: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const { notifySettingsSaved } = await import("../components/settings-signal.ts");
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
+		await act(async () => { notifySettingsSaved("dictation"); }); // a fresh language store read
+		assert.equal(q(host, "dictation-endpoint"), null, "Deepgram: no OpenAI endpoint");
+		assert.ok(q(host, "dictation-setup-hint"));
+		assert.ok(q(host, "key-deepgram_api_key"));
+		assert.equal(q(host, "dictation-openai-key"), null);
+		const selector = q(host, "dictation-provider") as HTMLSelectElement;
+		await act(async () => { Object.defineProperty(selector, "value", { configurable: true, value: "openai" }); selector.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		assert.ok(q(host, "dictation-endpoint"));
+		assert.equal(q(host, "dictation-setup-hint"), null, "the Deepgram setup hint gives way");
+		assert.equal(q(host, "key-deepgram_api_key"), null, "OpenAI's key row replaces Deepgram's");
+		assert.match(q(host, "dictation-openai-key-status")!.textContent ?? "", /not set/);
+		assert.equal(q(host, "dictation-endpoint-openai"), null, "no second OpenAI key line under the endpoint");
+		await click(q(host, "dictation-openai-key"));
+		assert.ok(q(host, "key-openai-editor"), "opens the OpenAI paste field in Model API keys");
+		const box = q(host, "dictation-endpoint-custom") as HTMLInputElement;
+		await act(async () => { box.checked = true; box.click(); });
+		assert.deepEqual(puts.at(-1), ["dictation", { language: "pl", baseUrl: "http://old.test/v1", customEndpoint: true }]);
+		assert.ok(q(host, "dictation-openai-key"), "the OpenAI row stays put with a custom endpoint (no layout shift)");
 	});
 
 	it("the shell's navigation request opens General, but opening alone never checks", async () => {

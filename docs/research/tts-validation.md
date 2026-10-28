@@ -224,6 +224,17 @@ the custom row turns that same row into its inline editor; only one input
 exists while editing. The switch kept its position in both states at 1440
 and 390px.
 
+## Simplification: OpenAI by default, custom endpoint under Advanced (2026-10-28)
+
+The key-source picker, the `/models`-backed model picker and its routes
+were removed. TTS and OpenAI dictation now use OpenAI at a fixed model with
+the OpenAI key from Providers; Advanced's "Use custom endpoint" checkbox
+switches to a saved server, model and the section's own key (fields greyed
+while off, values kept). The OpenAI key is never sent to a custom server.
+Dictation settings moved into Providers → Dictation beside upstream's
+Deepgram key and language row; OpenAI dictation sends the language's
+ISO-639-1 part.
+
 ## Checks outside this validation
 
 The entire repository test suite, a human listening test, and a packaged

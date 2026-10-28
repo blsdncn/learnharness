@@ -85,3 +85,6 @@ export * from "./session-markdown.ts";
 // speech.ts (listen wave, 2026-10-26): the /api/tts/openai request contract and
 // spoken-text splitting. Pure, browser-safe.
 export * from "./speech.ts";
+// audio-connection.ts: where TTS and OpenAI dictation requests go (OpenAI,
+// or a custom endpoint) and which stored key they read. Browser-safe.
+export * from "./audio-connection.ts";

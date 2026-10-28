@@ -35,7 +35,6 @@ import {
 	type BackgroundModelRole,
 	type FactorySettings,
 	type GeneralSettings,
-	type DictationSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type ModelSlot,
@@ -43,6 +42,8 @@ import {
 	type RoleModelOverride,
 	type UserSettings,
 } from "./settings.ts";
+import type { DictationLanguage } from "./dictation.ts";
+import { dictationConnection, ttsConnection, type AudioConnection } from "./audio-connection.ts";
 
 /** A configured model slot: the tier's concrete model, with its optional
  *  thinking level. UNSET level is legal — the engine build resolves it
@@ -70,7 +71,8 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	/** The language, and where OpenAI dictation goes. */
+	dictation: { language: DictationLanguage } & AudioConnection;
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
@@ -95,8 +97,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Connection fields default to OpenAI and OPENAI_API_KEY; unset enabled = off. */
-	speech: FactorySettings["speech"] & { enabled: boolean | undefined };
+	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is on. */
+	speech: { enabled: boolean | undefined; voice: string } & AudioConnection;
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -183,9 +185,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
-			baseUrl: record?.dictation?.baseUrl ?? FACTORY_SETTINGS.dictation.baseUrl,
-			model: record?.dictation?.model ?? FACTORY_SETTINGS.dictation.model,
-			keySource: record?.dictation?.keySource ?? FACTORY_SETTINGS.dictation.keySource,
+			...dictationConnection(record?.dictation),
 		},
 		agent: {
 			models,
@@ -229,10 +229,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		speech: {
 			enabled: record?.speech?.enabled,
-			baseUrl: record?.speech?.baseUrl ?? FACTORY_SETTINGS.speech.baseUrl,
-			model: record?.speech?.model ?? FACTORY_SETTINGS.speech.model,
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
-			keySource: record?.speech?.keySource ?? FACTORY_SETTINGS.speech.keySource,
+			...ttsConnection(record?.speech),
 		},
 	};
 }

@@ -34,8 +34,8 @@ import {
 	normalizeSpeechBaseUrl,
 } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
-import { isAudioKeySource } from "../core/auth-keys.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import type { AudioEndpointSettings } from "../core/audio-connection.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -392,11 +392,38 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** speech (listen wave, 2026-10-26): the OpenAI-compatible endpoint's
- *  non-secret knobs. Strict write side: a present baseUrl must be an
- *  http(s) URL (stored without its trailing slash); present model/voice
- *  must be non-empty ids. An empty string clears the field (absent =
- *  OpenAI's default at resolution). Replace-whole, like every section. */
+/** The custom-endpoint knobs TTS and dictation share. Strict write side:
+ *  customEndpoint is a boolean; a present baseUrl must be an http(s) URL
+ *  (stored without its trailing slash); a present model must be a
+ *  non-empty id. An empty string clears the field. */
+function parseAudioEndpoint(raw: Record<string, unknown>): SettingsBodyResult<AudioEndpointSettings> {
+	const settings: AudioEndpointSettings = {};
+	if (raw.customEndpoint !== undefined) {
+		if (typeof raw.customEndpoint !== "boolean") return { ok: false, error: "customEndpoint must be a boolean" };
+		settings.customEndpoint = raw.customEndpoint;
+	}
+	if (raw.baseUrl !== undefined && raw.baseUrl !== "") {
+		const baseUrl = typeof raw.baseUrl === "string" ? normalizeSpeechBaseUrl(raw.baseUrl) : null;
+		if (!baseUrl) return { ok: false, error: "baseUrl must be an http(s) URL without credentials, a query, or a fragment, e.g. http://127.0.0.1:8000/v1" };
+		settings.baseUrl = baseUrl;
+	}
+	const model = parseSpeechId(raw, "model");
+	if (!model.ok) return model;
+	if (model.settings) settings.model = model.settings;
+	return { ok: true, settings };
+}
+
+function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyResult<string | undefined> {
+	const value = raw[key];
+	if (value === undefined || value === "") return { ok: true, settings: undefined };
+	if (typeof value !== "string" || !value.trim() || value.trim().length > SPEECH_ID_MAX) {
+		return { ok: false, error: `${key} must be a non-empty id of at most ${SPEECH_ID_MAX} characters` };
+	}
+	return { ok: true, settings: value.trim() };
+}
+
+/** speech (listen wave, 2026-10-26): listening, the voice, and the custom
+ *  endpoint. Replace-whole, like every section. */
 export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<SpeechSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -405,42 +432,31 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
 		settings.enabled = raw.enabled;
 	}
-	if (raw.baseUrl !== undefined && raw.baseUrl !== "") {
-		const baseUrl = typeof raw.baseUrl === "string" ? normalizeSpeechBaseUrl(raw.baseUrl) : null;
-		if (!baseUrl) return { ok: false, error: "baseUrl must be an http(s) URL without credentials, a query, or a fragment, e.g. https://api.openai.com/v1" };
-		settings.baseUrl = baseUrl;
-	}
-	if (raw.keySource !== undefined) {
-		if (!isAudioKeySource(raw.keySource)) return { ok: false, error: 'keySource must be "custom" or a provider key name such as OPENAI_API_KEY' };
-		settings.keySource = raw.keySource;
-	}
-	for (const key of ["model", "voice"] as const) {
-		const value = raw[key];
-		if (value === undefined || value === "") continue;
-		if (typeof value !== "string" || !value.trim() || value.trim().length > SPEECH_ID_MAX) {
-			return { ok: false, error: `${key} must be a non-empty id of at most ${SPEECH_ID_MAX} characters` };
-		}
-		settings[key] = value.trim();
-	}
-	return { ok: true, settings };
+	const voice = parseSpeechId(raw, "voice");
+	if (!voice.ok) return voice;
+	if (voice.settings) settings.voice = voice.settings;
+	const endpoint = parseAudioEndpoint(raw);
+	if (!endpoint.ok) return endpoint;
+	return { ok: true, settings: { ...settings, ...endpoint.settings } };
 }
 
-/** The section→parser map for PUT /api/settings/[section] (the route also
- *  carries the special prompts sub-resource). */
+/** dictation: the language (one of Nova-3's codes; OpenAI gets its
+ *  language part) and the OpenAI custom endpoint. */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	// Same connection rules as speech; any provider key may go to any URL —
-	// picking it in the key row is the consent.
-	const connection = parseSpeechSettingsBody({ baseUrl: raw.baseUrl, model: raw.model, keySource: raw.keySource });
-	if (!connection.ok) return connection;
-	const settings: DictationSettings = connection.settings;
+	const settings: DictationSettings = {};
 	if (raw.language !== undefined) {
 		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
 		settings.language = raw.language;
 	}
-	return { ok: true, settings };
+	const endpoint = parseAudioEndpoint(raw);
+	if (!endpoint.ok) return endpoint;
+	return { ok: true, settings: { ...settings, ...endpoint.settings } };
 }
+
+/** The section→parser map for PUT /api/settings/[section] (the route also
+ *  carries the special prompts sub-resource). */
 
 export const SETTINGS_SECTIONS = {
 	general: parseGeneralSettingsBody,

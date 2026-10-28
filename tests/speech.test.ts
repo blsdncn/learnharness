@@ -81,12 +81,16 @@ describe("the /api/tts/openai request contract (core)", () => {
 
 describe("the speech settings section", () => {
 	it("sanitizes stored values: http(s) only, no trailing slash, trimmed ids", () => {
-		const r = sanitizeUserSettings({ version: 1, speech: { baseUrl: "http://127.0.0.1:47616/v1/", model: " tts-1 ", voice: "" } });
-		assert.deepEqual(r?.speech, { baseUrl: "http://127.0.0.1:47616/v1", model: "tts-1" });
+		const r = sanitizeUserSettings({ version: 1, speech: { customEndpoint: true, baseUrl: "http://127.0.0.1:47616/v1/", model: " tts-1 ", voice: "", keySource: "custom" } });
+		assert.deepEqual(r?.speech, { customEndpoint: true, baseUrl: "http://127.0.0.1:47616/v1", model: "tts-1" });
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { baseUrl: "file:///etc" } })?.speech, {});
 	});
-	it("resolves absent fields to OpenAI's endpoint and defaults", () => {
-		assert.deepEqual(resolveSettings(null).speech, { enabled: undefined, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy", keySource: "OPENAI_API_KEY" });
+	it("resolves to OpenAI with its key unless the custom endpoint is on", () => {
+		const openai = { enabled: undefined, voice: "alloy", custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", keyId: "OPENAI_API_KEY" };
+		assert.deepEqual(resolveSettings(null).speech, openai);
+		assert.deepEqual(resolveSettings({ version: 1, speech: { baseUrl: "http://local.test/v1", model: "x" } }).speech, openai, "saved endpoint unused while off");
+		assert.deepEqual(resolveSettings({ version: 1, speech: { customEndpoint: true, baseUrl: "http://local.test/v1" } }).speech,
+			{ enabled: undefined, voice: "alloy", custom: true, baseUrl: "http://local.test/v1", model: "gpt-4o-mini-tts", keyId: "TTS_API_KEY" });
 		assert.equal(resolveSettings({ version: 1, speech: { voice: "geffenv1" } }).speech.voice, "geffenv1");
 	});
 	it("PUT parser: rejects bad URLs and ids with a rationale; empty strings clear", () => {
@@ -94,9 +98,10 @@ describe("the speech settings section", () => {
 		assert.ok(!bad.ok);
 		if (!bad.ok) assert.match(bad.error, /http\(s\) URL/);
 		assert.ok(!parseSpeechSettingsBody({ voice: 42 }).ok);
-		const ok = parseSpeechSettingsBody({ baseUrl: "https://api.openai.com/v1/", model: "", voice: "alloy" });
+		assert.ok(!parseSpeechSettingsBody({ customEndpoint: "on" }).ok);
+		const ok = parseSpeechSettingsBody({ customEndpoint: false, baseUrl: "https://api.openai.com/v1/", model: "", voice: "alloy", keySource: "GROQ_API_KEY" });
 		assert.ok(ok.ok);
-		if (ok.ok) assert.deepEqual(ok.settings, { baseUrl: "https://api.openai.com/v1", voice: "alloy" });
+		if (ok.ok) assert.deepEqual(ok.settings, { customEndpoint: false, baseUrl: "https://api.openai.com/v1", voice: "alloy" });
 	});
 	it("preserves explicit activation and rejects invalid activation or URL secrets", () => {
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { enabled: false } })?.speech, { enabled: false });
@@ -134,48 +139,57 @@ describe("math speech (speech-rule-engine, server-side)", () => {
 });
 
 describe("GET/POST /api/tts/openai against an OpenAI-compatible server", () => {
-	beforeEach(() => writeSettings({ version: 1, speech: { enabled: true, keySource: "custom", baseUrl: "http://speech.test/v1/", model: "tts-1", voice: "alloy" } }));
+	beforeEach(() => writeSettings({ version: 1, speech: { enabled: true, customEndpoint: true, baseUrl: "http://speech.test/v1/", model: "tts-1", voice: "alloy" } }));
 
 	it("is off until enabled, even with a saved key — the listen affordances stay hidden", async () => {
 		process.env.TTS_API_KEY = "sfy-local-throwaway-test-key";
-		writeSettings({ version: 1, speech: { keySource: "custom", baseUrl: "http://speech.test/v1/", model: "tts-1", voice: "alloy" } });
+		writeSettings({ version: 1, speech: { customEndpoint: true, baseUrl: "http://speech.test/v1/", model: "tts-1", voice: "alloy" } });
 		const res = await tts.GET();
-		assert.deepEqual(await res.json(), { configured: false, keyPresent: true, keySource: "custom", baseUrl: "http://speech.test/v1", model: "tts-1", voice: "alloy" });
+		assert.deepEqual(await res.json(), { configured: false, keyPresent: true, custom: true, baseUrl: "http://speech.test/v1", model: "tts-1", voice: "alloy" });
 		const refused = await post({ parts: [{ text: "Hello" }] });
 		assert.equal(refused.status, 503);
 		assert.match(((await refused.json()) as { message: string }).message, /Settings → TTS/);
 	});
 
-	it("defaults to the OpenAI provider key, never falling back to the custom key", async () => {
-		writeSettings({ version: 1, speech: { enabled: true, baseUrl: "http://speech.test/v1" } });
+	it("defaults to OpenAI with the OpenAI key, never the custom key — even with an endpoint saved", async () => {
+		writeSettings({ version: 1, speech: { enabled: true, customEndpoint: false, baseUrl: "http://speech.test/v1", model: "tts-1" } });
 		process.env.TTS_API_KEY = "custom-key-must-not-be-sent";
 		const calls = fakeServer(() => new Response(new Uint8Array([0xff, 0xf3])));
 		const missing = await post({ parts: [{ text: "Hello" }] });
 		assert.equal(missing.status, 503);
-		assert.match(((await missing.json()) as { message: string }).message, /OPENAI_API_KEY/);
+		assert.match(((await missing.json()) as { message: string }).message, /No OpenAI API key/);
 		assert.equal(calls.length, 0);
 		process.env.OPENAI_API_KEY = "sk-fake-openai-throwaway-key";
-		const status = await (await tts.GET()).json();
-		assert.equal(status.keySource, "OPENAI_API_KEY");
-		assert.equal(status.keyPresent, true);
-		const res = await post({ parts: [{ text: "Hello" }] });
-		assert.equal(res.status, 200);
-		await res.arrayBuffer();
-		assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, "Bearer sk-fake-openai-throwaway-key");
+		try {
+			const status = await (await tts.GET()).json();
+			assert.equal(status.custom, false);
+			assert.equal(status.keyPresent, true);
+			const res = await post({ parts: [{ text: "Hello" }] });
+			assert.equal(res.status, 200);
+			await res.arrayBuffer();
+			assert.equal(calls[0]!.url, "https://api.openai.com/v1/audio/speech");
+			assert.equal(calls[0]!.body!.model, "gpt-4o-mini-tts");
+			assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, "Bearer sk-fake-openai-throwaway-key");
+		} finally {
+			delete process.env.OPENAI_API_KEY;
+		}
 	});
 
-	it("sends any selected provider key to a custom server", async () => {
-		writeSettings({ version: 1, speech: { enabled: true, keySource: "GROQ_API_KEY", baseUrl: "http://groq.test/openai/v1" } });
-		process.env.GROQ_API_KEY = "gsk_fake-throwaway-test-key";
+	it("never sends the OpenAI key to a custom server, and refuses one without a server", async () => {
+		process.env.OPENAI_API_KEY = "sk-fake-openai-must-not-leak";
 		try {
 			const calls = fakeServer(() => new Response(new Uint8Array([0xff, 0xf3])));
 			const res = await post({ parts: [{ text: "Hello" }] });
 			assert.equal(res.status, 200);
 			await res.arrayBuffer();
-			assert.equal(calls[0]!.url, "http://groq.test/openai/v1/audio/speech");
-			assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, "Bearer gsk_fake-throwaway-test-key");
+			assert.equal(new Headers(calls[0]!.init.headers).has("authorization"), false, "no endpoint key: keyless");
+			writeSettings({ version: 1, speech: { enabled: true, customEndpoint: true } });
+			const noServer = await post({ parts: [{ text: "Hello" }] });
+			assert.equal(noServer.status, 503);
+			assert.match(((await noServer.json()) as { message: string }).message, /No server URL/);
+			assert.equal(calls.length, 1);
 		} finally {
-			delete process.env.GROQ_API_KEY;
+			delete process.env.OPENAI_API_KEY;
 		}
 	});
 
@@ -216,7 +230,7 @@ describe("GET/POST /api/tts/openai against an OpenAI-compatible server", () => {
 		fakeServer(() => Response.json({ error: { message: "bad key" } }, { status: 401 }));
 		const res = await post({ parts: [{ text: "Hello" }] });
 		assert.equal(res.status, 502);
-		assert.match(((await res.json()) as { message: string }).message, /401 — check the API key in Settings → TTS/);
+		assert.match(((await res.json()) as { message: string }).message, /401 — check the API key in Settings → TTS → Advanced/);
 		fakeServer(() => {
 			throw new TypeError("fetch failed");
 		});
@@ -233,7 +247,7 @@ describe("GET/POST /api/tts/openai against an OpenAI-compatible server", () => {
 	});
 
 	it("explicit activation supports keyless providers without a fabricated bearer token", async () => {
-		writeSettings({ version: 1, speech: { enabled: true, keySource: "custom", baseUrl: "http://speech.test/v1" } });
+		writeSettings({ version: 1, speech: { enabled: true, customEndpoint: true, baseUrl: "http://speech.test/v1" } });
 		const calls = fakeServer(() => new Response(new Uint8Array([0xff, 0xf3])));
 		const status = await (await tts.GET()).json();
 		assert.equal(status.configured, true);
@@ -245,7 +259,7 @@ describe("GET/POST /api/tts/openai against an OpenAI-compatible server", () => {
 	});
 	it("explicit disable wins over a saved key and never contacts the provider", async () => {
 		process.env.TTS_API_KEY = "throwaway-test-key";
-		writeSettings({ version: 1, speech: { enabled: false, keySource: "custom" } });
+		writeSettings({ version: 1, speech: { enabled: false, customEndpoint: true } });
 		const calls = fakeServer(() => new Response(""));
 		assert.equal((await (await tts.GET()).json()).keyPresent, true);
 		assert.equal((await post({ parts: [{ text: "Hello" }] })).status, 503);

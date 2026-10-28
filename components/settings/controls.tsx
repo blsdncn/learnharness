@@ -214,7 +214,7 @@ export function CommitInput({
 	ariaLabel,
 	testid,
 	type = "text",
-	wide,
+	disabled,
 	className,
 }: {
 	/** "" = unset (the factory default). Mirrors the STORED record —
@@ -227,8 +227,7 @@ export function CommitInput({
 	ariaLabel: string;
 	testid?: string;
 	type?: "text" | "number";
-	/** Room for a URL instead of a short id. */
-	wide?: boolean;
+	disabled?: boolean;
 	className?: string;
 }) {
 	// The draft exists only while editing; a blur shows the record's value
@@ -243,6 +242,7 @@ export function CommitInput({
 			placeholder={placeholder}
 			aria-label={ariaLabel}
 			data-testid={testid}
+			disabled={disabled}
 			onChange={(e) => {
 				setEditing(true);
 				setDraft(e.target.value);
@@ -261,8 +261,8 @@ export function CommitInput({
 				}
 			}}
 			className={cn(
-				"h-7 min-w-0 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-				wide ? "w-64" : "w-40",
+				"h-7 w-40 min-w-0 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+				disabled && "cursor-not-allowed",
 				className,
 			)}
 		/>

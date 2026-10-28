@@ -1,8 +1,9 @@
-import { DEFAULT_DICTATION_MODEL, OPENAI_DICTATION_BASE_URL, DICTATION_SAMPLE_RATE, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, type DictationSettings } from "../core/dictation.ts";
+import { DICTATION_SAMPLE_RATE, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, openAIDictationLanguage, type DictationLanguage } from "../core/dictation.ts";
 import { normalizeSpeechBaseUrl } from "../core/settings.ts";
-import { CUSTOM_AUDIO_KEY, DEFAULT_AUDIO_KEY_SOURCE } from "../core/auth-keys.ts";
+import type { AudioConnection } from "../core/audio-connection.ts";
 
-interface DictationDeps extends DictationSettings {
+interface DictationDeps extends AudioConnection {
+	language: DictationLanguage;
 	apiKey: string | undefined;
 	enabled: boolean;
 	fetchFn?: typeof fetch;
@@ -49,17 +50,20 @@ function validWav(bytes: Uint8Array): boolean {
 
 /** One explicitly selected Platform API transcription. Never exposes a key or raw upstream error. */
 export async function transcribeOpenAIDictation(request: Request, deps: DictationDeps): Promise<Response> {
-	if (!deps.enabled) return response("Select OpenAI-compatible in Dictation settings first.", 403);
-	const baseUrl = normalizeSpeechBaseUrl(deps.baseUrl ?? OPENAI_DICTATION_BASE_URL);
+	if (!deps.enabled) return response("Select OpenAI in Settings → Providers → Dictation first.", 403);
+	if (!deps.baseUrl) return response("No server URL — set one in Settings → Providers → Dictation → Advanced.", 503);
+	const baseUrl = normalizeSpeechBaseUrl(deps.baseUrl);
 	if (!baseUrl) return response("Invalid dictation server URL.", 400);
-	if (deps.keySource !== CUSTOM_AUDIO_KEY && !deps.apiKey) return response(`No ${deps.keySource ?? DEFAULT_AUDIO_KEY_SOURCE} configured — pick a saved key in Settings → Dictation.`, 503);
+	if (!deps.custom && !deps.apiKey) return response("No OpenAI API key — add one in Settings → Providers.", 503);
 	if (!request.headers.get("content-type")?.toLowerCase().startsWith("audio/wav")) return response("Expected WAV audio.", 415);
 	let bytes: Uint8Array | null;
 	try { bytes = await readAudio(request); } catch { return response("Could not read dictation audio.", 400); }
 	if (!bytes || !validWav(bytes)) return response("Invalid or oversized dictation audio.", 400);
 	const form = new FormData();
 	form.append("file", new Blob([Uint8Array.from(bytes)], { type: "audio/wav" }), "dictation.wav");
-	form.append("model", deps.model ?? DEFAULT_DICTATION_MODEL);
+	form.append("model", deps.model);
+	const language = openAIDictationLanguage(deps.language);
+	if (language) form.append("language", language);
 	try {
 		const upstream = await (deps.fetchFn ?? fetch)(`${baseUrl}/audio/transcriptions`, {
 			method: "POST",
@@ -77,5 +81,5 @@ export async function transcribeOpenAIDictation(request: Request, deps: Dictatio
 			return response("Transcription server returned an invalid transcript.", 502);
 		}
 		return Response.json({ text: (result as { text: string }).text }, { headers: { "Cache-Control": "no-store" } });
-	} catch { return response("Transcription could not be completed. Check Dictation connection settings.", 502); }
+	} catch { return response("Transcription could not be completed. Check the dictation settings in Providers.", 502); }
 }

@@ -1,9 +1,9 @@
 /** Opt-in live synthesis through the same route used by the listening UI.
  * Run with: node --import tsx scripts/smoke-tts.mjs
- * TTS_BASE_URL, TTS_MODEL, TTS_VOICE override OpenAI defaults.
- * Authentication: TTS_KEY_SOURCE=OPENAI_API_KEY (or another provider key name)
- * reads that key (or <NAME>_FILE); otherwise the custom TTS_API_KEY or
- * TTS_API_KEY_FILE, omitting both for keyless servers.
+ * Default: OpenAI, with OPENAI_API_KEY (or OPENAI_API_KEY_FILE).
+ * TTS_BASE_URL turns on the custom endpoint (TTS_MODEL optional), with
+ * TTS_API_KEY or TTS_API_KEY_FILE — omit both for keyless servers.
+ * TTS_VOICE overrides the voice.
  * Temporary settings are isolated; no audio or credentials are saved.
  */
 import assert from "node:assert/strict";
@@ -15,8 +15,8 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-live-tts-"));
 process.env.LH_DATA_DIR = dir;
 process.env.LH_AUTH_FILE = path.join(dir, "auth.json");
 try {
-	const keySource = process.env.TTS_KEY_SOURCE ?? "custom";
-	const keyId = keySource === "custom" ? "TTS_API_KEY" : keySource;
+	const custom = Boolean(process.env.TTS_BASE_URL);
+	const keyId = custom ? "TTS_API_KEY" : "OPENAI_API_KEY";
 	if (process.env[`${keyId}_FILE`]) {
 		process.env[keyId] = fs.readFileSync(process.env[`${keyId}_FILE`], "utf8").trim();
 		assert.ok(process.env[keyId], "The API key file is empty");
@@ -25,10 +25,9 @@ try {
 	const { writeSettings } = await import("../src/store/settings.ts");
 	const settings = parseSpeechSettingsBody({
 		enabled: true,
-		keySource,
-		baseUrl: process.env.TTS_BASE_URL ?? "https://api.openai.com/v1",
-		model: process.env.TTS_MODEL ?? "gpt-4o-mini-tts",
-		voice: process.env.TTS_VOICE ?? "alloy",
+		customEndpoint: custom,
+		...(custom ? { baseUrl: process.env.TTS_BASE_URL, model: process.env.TTS_MODEL } : {}),
+		voice: process.env.TTS_VOICE,
 	});
 	assert.ok(settings.ok, settings.ok ? "" : settings.error);
 	writeSettings({ version: 1, speech: settings.settings });

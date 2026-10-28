@@ -43,52 +43,57 @@ it("only dispatches through the saved OpenAI provider and Platform key", async (
 	assert.equal(calls, 1);
 });
 
-it("a separate dictation credential never falls back to OpenAI or TTS keys", async () => {
+it("a custom endpoint uses only its own key — never the OpenAI or TTS keys", async () => {
 	assert.equal(saveKey("STT_API_KEY", "test-separate-stt-credential").ok, true);
 	assert.equal(saveKey("TTS_API_KEY", "test-separate-tts-credential").ok, true);
-	writeSettings({ version: 1, general: { dictationProvider: "openai" }, dictation: { baseUrl: "http://compatible.test/v1", model: "another-model", keySource: "custom" } });
+	writeSettings({ version: 1, general: { dictationProvider: "openai" }, dictation: { language: "de", customEndpoint: true, baseUrl: "http://compatible.test/v1", model: "another-model" } });
 	let auth: string | undefined;
 	globalThis.fetch = async (input, init) => {
 		assert.equal(String(input), "http://compatible.test/v1/audio/transcriptions");
 		auth = (init?.headers as Record<string, string>).Authorization;
 		assert.equal((init?.body as FormData).get("model"), "another-model");
+		assert.equal((init?.body as FormData).get("language"), "de");
 		return Response.json({ text: "Independent" });
 	};
 	assert.equal((await POST(request())).status, 200);
 	assert.equal(auth, "Bearer test-separate-stt-credential");
 	deleteKey("STT_API_KEY");
 	assert.equal((await POST(request())).status, 200);
-	assert.equal(auth, undefined, "an empty separate key is a keyless request, never a fallback");
+	assert.equal(auth, undefined, "an empty endpoint key is a keyless request, never the OpenAI key");
+});
+
+it("a custom endpoint without a server is refused, never sent to OpenAI", async () => {
+	writeSettings({ version: 1, general: { dictationProvider: "openai" }, dictation: { customEndpoint: true } });
+	globalThis.fetch = async () => { assert.fail("must not dispatch"); };
+	const res = await POST(request());
+	assert.equal(res.status, 503);
+	assert.match(((await res.json()) as { message: string }).message, /No server URL/);
+});
+
+it("unchecking the custom endpoint goes back to OpenAI with the OpenAI key", async () => {
+	writeSettings({ version: 1, general: { dictationProvider: "openai" }, dictation: { customEndpoint: false, baseUrl: "http://compatible.test/v1", model: "another-model" } });
+	let url: string | undefined;
+	globalThis.fetch = async (input, init) => {
+		url = String(input);
+		assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer sk-fake-test-key-123456");
+		assert.equal((init?.body as FormData).get("model"), "gpt-transcribe");
+		return Response.json({ text: "OpenAI" });
+	};
+	assert.equal((await POST(request())).status, 200);
+	assert.equal(url, "https://api.openai.com/v1/audio/transcriptions");
 });
 
 it("refuses a changed connection instead of sending captured audio to a different server", async () => {
 	globalThis.fetch = async () => { assert.fail("must not dispatch stale recording"); };
 	const recording = request();
-	recording.headers.set("x-lh-dictation-connection", JSON.stringify({ baseUrl: "http://previous.test/v1", model: "another-model", keySource: "custom" }));
+	recording.headers.set("x-lh-dictation-connection", JSON.stringify({ custom: true, baseUrl: "http://previous.test/v1", model: "another-model", keyId: "STT_API_KEY" }));
 	assert.equal((await POST(recording)).status, 409);
 });
 
 it("finishes a pinned OpenAI-compatible recording after the default switches to Deepgram", async () => {
-	writeSettings({ version: 1, general: { dictationProvider: "deepgram" }, dictation: { baseUrl: "http://compatible.test/v1", model: "another-model", keySource: "custom" } });
+	writeSettings({ version: 1, general: { dictationProvider: "deepgram" }, dictation: { customEndpoint: true, baseUrl: "http://compatible.test/v1", model: "another-model" } });
 	globalThis.fetch = async () => Response.json({ text: "Pinned recording" });
 	const recording = request();
-	recording.headers.set("x-lh-dictation-connection", JSON.stringify({ baseUrl: "http://compatible.test/v1", model: "another-model", keySource: "custom" }));
+	recording.headers.set("x-lh-dictation-connection", JSON.stringify({ custom: true, baseUrl: "http://compatible.test/v1", model: "another-model", keyId: "STT_API_KEY" }));
 	assert.equal((await POST(recording)).status, 200);
-});
-
-it("sends the selected provider key to a custom endpoint, and refuses when that key is missing", async () => {
-	writeSettings({ version: 1, general: { dictationProvider: "openai" }, dictation: { baseUrl: "http://groq.test/openai/v1", keySource: "GROQ_API_KEY" } });
-	let auth: string | undefined;
-	globalThis.fetch = async (input, init) => {
-		assert.equal(String(input), "http://groq.test/openai/v1/audio/transcriptions");
-		auth = (init?.headers as Record<string, string>).Authorization;
-		return Response.json({ text: "Provider key" });
-	};
-	const missing = await POST(request());
-	assert.equal(missing.status, 503, "a missing provider key never falls back to another key");
-	assert.match(((await missing.json()) as { message: string }).message, /GROQ_API_KEY/);
-	assert.equal(saveKey("GROQ_API_KEY", "gsk_fake-test-key-1234567890").ok, true);
-	assert.equal((await POST(request())).status, 200);
-	assert.equal(auth, "Bearer gsk_fake-test-key-1234567890");
-	deleteKey("GROQ_API_KEY");
 });

@@ -49,4 +49,3 @@ export { sessionCost } from "./pricing.ts";
 // Speech (listen wave, 2026-10-26): OpenAI-compatible TTS behind /api/tts/openai.
 export * from "./speech.ts";
 export * from "./openai-dictation.ts";
-export * from "./audio-models.ts";

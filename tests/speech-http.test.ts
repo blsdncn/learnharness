@@ -60,7 +60,7 @@ describe("TTS through a strict OpenAI-compatible HTTP provider", () => {
 		expectedKey = undefined;
 		slow = false;
 		closed = new Promise((resolve) => { markClosed = resolve; });
-		writeSettings({ version: 1, speech: { enabled: true, keySource: "custom", baseUrl } });
+		writeSettings({ version: 1, speech: { enabled: true, customEndpoint: true, baseUrl } });
 	});
 	afterEach(() => {
 		delete process.env.TTS_API_KEY;

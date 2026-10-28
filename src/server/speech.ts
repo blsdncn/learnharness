@@ -1,8 +1,9 @@
 /**
- * Speech (listen wave, 2026-10-26): text-to-speech through ANY server that
- * speaks the OpenAI shape — `POST {baseUrl}/audio/speech` with
- * {model, voice, input, response_format} returning audio bytes. OpenAI
- * itself and compatible hosted or local servers use the same request.
+ * Speech (listen wave, 2026-10-26): text-to-speech through the OpenAI shape —
+ * `POST {baseUrl}/audio/speech` with {model, voice, input, response_format}
+ * returning audio bytes. OpenAI by default; a custom endpoint (any
+ * compatible hosted or local server) uses the same request
+ * (core/audio-connection.ts).
  *
  * The key never reaches the browser (the Deepgram precedent): the client
  * posts text to /api/tts/openai and this module calls the provider. That also
@@ -17,27 +18,24 @@
 
 import katex from "katex";
 import { normalizeSpokenText, splitSpokenText, type SpeechPart } from "../core/speech.ts";
-import { audioKeyId, CUSTOM_AUDIO_KEY } from "../core/auth-keys.ts";
 import { keyValue } from "./keys.ts";
 import { effectiveSettings } from "./stores.ts";
-
-export const TTS_KEY_ID = "TTS_API_KEY";
 
 export interface SpeechStatus {
 	/** Listening is enabled; this is not a provider readiness check. */
 	configured: boolean;
-	/** The selected key source has a saved value. */
+	/** The connection's key has a saved value. */
 	keyPresent: boolean;
-	keySource: string;
-	baseUrl: string;
+	/** The custom endpoint is on (otherwise OpenAI). */
+	custom: boolean;
+	baseUrl: string | null;
 	model: string;
 	voice: string;
 }
 
 export function speechStatus(): SpeechStatus {
-	const { enabled, baseUrl, model, voice, keySource } = effectiveSettings().speech;
-	const keyPresent = Boolean(keyValue(audioKeyId(keySource, TTS_KEY_ID)));
-	return { configured: enabled ?? false, keyPresent, keySource, baseUrl, model, voice };
+	const { enabled, voice, custom, baseUrl, model, keyId } = effectiveSettings().speech;
+	return { configured: enabled ?? false, keyPresent: Boolean(keyValue(keyId)), custom, baseUrl, model, voice };
 }
 
 /** A refusal carrying the HTTP status the route should answer with. */
@@ -108,7 +106,7 @@ export async function spokenText(parts: readonly SpeechPart[]): Promise<string> 
 
 // ─── synthesis ───────────────────────────────────────────────────────────────
 
-async function requestSpeech(status: SpeechStatus, apiKey: string | undefined, input: string, signal: AbortSignal): Promise<Response> {
+async function requestSpeech(status: SpeechStatus & { baseUrl: string }, apiKey: string | undefined, input: string, signal: AbortSignal): Promise<Response> {
 	let res: Response;
 	try {
 		res = await fetch(`${status.baseUrl}/audio/speech`, {
@@ -125,7 +123,9 @@ async function requestSpeech(status: SpeechStatus, apiKey: string | undefined, i
 		// Provider errors may echo credentials or request contents. Return only
 		// the status and actionable local configuration guidance.
 		await res.body?.cancel().catch(() => {});
-		const why = res.status === 401 || res.status === 403 ? ` — check the API key in Settings → TTS` : "";
+		const why = res.status === 401 || res.status === 403
+			? status.custom ? " — check the API key in Settings → TTS → Advanced" : " — check the OpenAI key in Settings → Providers"
+			: "";
 		throw new SpeechError(502, `Speech server answered ${res.status}${why}`);
 	}
 	return res;
@@ -141,15 +141,16 @@ async function requestSpeech(status: SpeechStatus, apiKey: string | undefined, i
 export async function synthesizeSpeech(parts: readonly SpeechPart[], signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
 	const status = speechStatus();
 	if (!status.configured) throw new SpeechError(503, "Listening is off — enable it in Settings → TTS.");
-	const apiKey = keyValue(audioKeyId(status.keySource, TTS_KEY_ID));
-	if (!apiKey && status.keySource !== CUSTOM_AUDIO_KEY) {
-		throw new SpeechError(503, `No ${status.keySource} configured — pick a saved key in Settings → TTS.`);
-	}
+	const { baseUrl, keyId } = effectiveSettings().speech;
+	if (!baseUrl) throw new SpeechError(503, "No server URL — set one in Settings → TTS → Advanced.");
+	const apiKey = keyValue(keyId);
+	if (!apiKey && !status.custom) throw new SpeechError(503, "No OpenAI API key — add one in Settings → Providers.");
 	const chunks = splitSpokenText(await spokenText(parts));
 	if (chunks.length === 0) throw new SpeechError(400, "nothing to speak");
 	const abort = new AbortController();
 	const upstreamSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
-	const first = await requestSpeech(status, apiKey, chunks[0]!, upstreamSignal);
+	const target = { ...status, baseUrl };
+	const first = await requestSpeech(target, apiKey, chunks[0]!, upstreamSignal);
 	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	let cancelled = false;
 
@@ -158,7 +159,7 @@ export async function synthesizeSpeech(parts: readonly SpeechPart[], signal?: Ab
 			try {
 				for (let i = 0; i < chunks.length; i++) {
 					if (cancelled) return;
-					const res = i === 0 ? first : await requestSpeech(status, apiKey, chunks[i]!, upstreamSignal);
+					const res = i === 0 ? first : await requestSpeech(target, apiKey, chunks[i]!, upstreamSignal);
 					reader = res.body!.getReader();
 					for (;;) {
 						const { done, value } = await reader.read();

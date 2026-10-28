@@ -27,9 +27,6 @@ div[role="log"] > div {
 @media (max-width: 767px) {
 	html:not(.lh-electron) .h-dvh { height: var(--lh-mobile-height, 100dvh); }
 	html:not(.lh-electron) .lh-sessions-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; height: var(--lh-mobile-height, 100dvh); }
-	html:not(.lh-electron) .lh-input,
-	html:not(.lh-electron) input:not([type="range"]):not([type="checkbox"]),
-	html:not(.lh-electron) textarea { font-size: 16px; }
 	html:not(.lh-electron) [data-testid="settings-dialog"] { max-height: calc(var(--lh-mobile-height, 100dvh) - 1rem); }
 }
 

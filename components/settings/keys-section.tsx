@@ -23,8 +23,8 @@
  * effect immediately. Plaintext never returns from the store.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AUTH_KEYS, OPENAI_AUDIO_KEY_ID, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
@@ -49,8 +49,8 @@ interface KeysResponse {
  *  these ids are the contract). Derived from the catalog (search wave,
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
-/** The custom audio keys are entered inline in Settings → TTS / Dictation
- *  (their key rows), never listed here. */
+/** The custom-endpoint keys are entered inline under TTS / Dictation's
+ *  Advanced, never listed as rows. */
 const INLINE_KEY_IDS: readonly string[] = ["TTS_API_KEY", "STT_API_KEY"];
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id).filter((id) => !INLINE_KEY_IDS.includes(id)) as readonly string[];
 
@@ -340,8 +340,14 @@ export function KeysSection({
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
+	dictation,
 }: {
 	initialRow?: string;
+	/** Providers → Dictation's settings, built by the dialog (which owns
+	 *  the record): the provider choice on top. While OpenAI is the
+	 *  provider, its key row takes Deepgram's place (so switching barely
+	 *  moves the layout) and its endpoint sits below the language. */
+	dictation?: { provider: ReactNode; openai?: ReactNode };
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
@@ -439,6 +445,26 @@ export function KeysSection({
 	}
 
 	const { providerRows, toolRows, unknownRows, addable } = classifyKeys(statuses, providers);
+	const openaiKey = statuses.find((s) => s.id === OPENAI_AUDIO_KEY_ID);
+
+	/** OpenAI dictation's key row: open the OpenAI key's paste field up in
+	 *  Model API keys (its row when saved, the Add editor otherwise). */
+	function openOpenAIKey() {
+		const provider = providers?.find((p) => p.envVar === OPENAI_AUDIO_KEY_ID);
+		if (openaiKey || !provider) {
+			setOpenRow(OPENAI_AUDIO_KEY_ID);
+			setAdding(null);
+		} else {
+			setOpenRow(null);
+			setAdding(provider);
+			setAddError(null);
+		}
+		// After the commit: the row or editor exists now.
+		setTimeout(() => {
+			const target = document.querySelector(`[data-testid="key-${openaiKey || !provider ? OPENAI_AUDIO_KEY_ID.toLowerCase() : `${provider.id}-editor`}"]`);
+			target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+		}, 0);
+	}
 
 	async function saveNewProvider(p: ProviderKeyInfo, value: string) {
 		const err = await saveKey(p.envVar, value);
@@ -498,7 +524,21 @@ export function KeysSection({
 			</SettingsGroup>
 
 			{TOOL_GROUPS.map(({ label, testid, owns }) => <SettingsGroup key={label} label={label} testid={testid}>
-				{toolRows.filter((status) => owns(status.id)).map((status) => (
+				{label === "Dictation" && dictation?.provider}
+				{label === "Dictation" && dictation?.openai && (
+					<button
+						type="button"
+						data-testid="dictation-openai-key"
+						onClick={openOpenAIKey}
+						className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left transition-colors hover:bg-accent/50"
+					>
+						<span className="font-ui text-xs text-foreground">OpenAI</span>
+						<span data-testid="dictation-openai-key-status" className={`font-mono text-[11px] ${openaiKey?.present ? "text-muted-foreground" : "text-destructive"}`}>
+							{openaiKey?.present ? "set in Model API keys ↑" : "not set · add in Model API keys ↑"}
+						</span>
+					</button>
+				)}
+				{toolRows.filter((status) => owns(status.id) && !(label === "Dictation" && dictation?.openai)).map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -518,14 +558,14 @@ export function KeysSection({
 				))}
 				{label === "Dictation" && <>
 					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+					{dictation?.openai ?? <p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
 						Create a <a
 							href="https://console.deepgram.com/"
 							target="_blank"
 							rel="noreferrer"
 							className="underline underline-offset-2 hover:text-foreground"
 						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
+					</p>}
 				</>}
 			</SettingsGroup>)}
 

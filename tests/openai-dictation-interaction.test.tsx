@@ -12,7 +12,7 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	let provider: "openai" | "deepgram" = "openai";
 	let hasKey = true;
-	let connection: { baseUrl?: string; model?: string; keySource?: string } = {};
+	let connection: { customEndpoint?: boolean; baseUrl?: string; model?: string } = {};
 	let micCalls = 0;
 	let uploads = 0;
 	let mode: "defer" | "fail" | "success" = "defer";
@@ -137,7 +137,7 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		assert.equal(current!.error, OPENAI_DICTATION_KEYLESS);
 		assert.equal(micCalls, beforeMic, "missing key is detected before capturing audio");
 
-		connection = { baseUrl: "http://keyless.test/v1", model: "local-model", keySource: "custom" };
+		connection = { customEndpoint: true, baseUrl: "http://keyless.test/v1", model: "local-model" };
 		// Saves announce themselves; dictation reads the settled preference.
 		await act(async () => { notifySettingsSaved("dictation"); });
 		mode = "success";

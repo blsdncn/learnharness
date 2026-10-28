@@ -1,10 +1,10 @@
 /**
  * Text-to-speech (listen wave, 2026-10-26).
  *
- *   GET  → {configured, keyPresent, keySource, baseUrl, model, voice} — the listening
+ *   GET  → {configured, keyPresent, custom, baseUrl, model, voice} — the listening
  *          UI shows its affordances when listening is enabled.
  *   POST {parts: [{text} | {tex}]} → audio/mpeg for one listenable block,
- *          streamed from the configured OpenAI-compatible server. 503 when
+ *          streamed from OpenAI or the custom endpoint. 503 when
  *          unconfigured, 400 on a bad body, 502 when the provider fails.
  *
  * The provider key stays server-side (server/speech.ts).

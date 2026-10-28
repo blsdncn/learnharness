@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { CUSTOM_AUDIO_KEY, DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, resolveSettings, type DictationLanguage, type DictationProvider, type DictationConnection } from "@/src/core";
+import { DICTATION_STOP_PCM_BYTES, OPENAI_AUDIO_KEY_ID, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, resolveSettings, type AudioConnection, type DictationLanguage, type DictationProvider } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
@@ -108,7 +108,8 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
-export const OPENAI_DICTATION_KEYLESS = "Dictation needs the API key selected in Settings → Dictation";
+export const OPENAI_DICTATION_KEYLESS = "OpenAI dictation needs an OpenAI API key — add one in Providers";
+export const OPENAI_DICTATION_NO_SERVER = "Set the custom dictation server in Providers → Dictation → Advanced";
 
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
@@ -281,7 +282,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const phaseRef = useRef<DictationPhase>("idle");
 	const retryableRef = useRef(false);
 	const providerRef = useRef<DictationProvider | null>(null);
-	const connectionRef = useRef<DictationConnection | null>(null);
+	const connectionRef = useRef<AudioConnection | null>(null);
 	const levelRef = useRef(0);
 	const appendRef = useRef(append);
 	appendRef.current = append;
@@ -409,11 +410,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const { language: _, ...connection } = resolveSettings({ version: 1, dictation: section }).dictation;
 			providerRef.current = provider;
 			connectionRef.current = connection;
-			if (provider === "openai" && connection.keySource !== CUSTOM_AUDIO_KEY) {
+			if (provider === "openai" && !connection.baseUrl) throw new Error(OPENAI_DICTATION_NO_SERVER);
+			if (provider === "openai" && !connection.custom) {
 				const keys = await fetch("/api/keys", { cache: "no-store" });
-				if (!keys.ok) throw new Error("Could not check the dictation API key");
+				if (!keys.ok) throw new Error("Could not check the OpenAI API key");
 				const body = await keys.json() as { keys?: { id: string; present: boolean }[] };
-				if (!body.keys?.some((key) => key.id === connection.keySource && key.present)) throw new Error(OPENAI_DICTATION_KEYLESS);
+				if (!body.keys?.some((key) => key.id === OPENAI_AUDIO_KEY_ID && key.present)) throw new Error(OPENAI_DICTATION_KEYLESS);
 			}
 			if (gen !== genRef.current) return;
 			const tokenPromise = provider === "deepgram" ? warmTokens.mint() : null;
@@ -580,8 +582,9 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
-	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS;
+	 *  error keeps the old behavior (click = retry, which clears). OpenAI's
+	 *  missing key / missing custom server land in Providers the same way. */
+	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS || error === OPENAI_DICTATION_NO_SERVER;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	const recording = phase === "recording" || phase === "stopping";
 	/** Adaptive cell count (owner round 2): derived from the meter's
@@ -650,7 +653,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					onClick={() => {
 						if (keyless) {
 							clearError();
-							openSettings(error === DICTATION_KEYLESS ? "keys" : "dictation", error === DICTATION_KEYLESS ? DEEPGRAM_KEY_ID : undefined);
+							openSettings("keys", error === DICTATION_KEYLESS ? DEEPGRAM_KEY_ID : error === OPENAI_DICTATION_KEYLESS ? OPENAI_AUDIO_KEY_ID : undefined);
 						} else {
 							toggle();
 						}

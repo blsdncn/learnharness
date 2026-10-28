@@ -3,10 +3,13 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { describe, it } from "node:test";
 import { MAX_DICTATION_WAV_BYTES, pcm16Wav } from "../src/core/dictation.ts";
+import { dictationConnection } from "../src/core/audio-connection.ts";
 import { transcribeOpenAIDictation } from "../src/server/openai-dictation.ts";
 import nextConfig from "../next.config.ts";
 
 const key = "sk-test-openai-only";
+/** The default connection: OpenAI, its model and key. */
+const openai = { ...dictationConnection(undefined), language: "en" as const };
 const makeWav = () => pcm16Wav([new Uint8Array([1, 2, 3, 4]), new Uint8Array([5, 6])]);
 const request = (body: Blob, contentType = "audio/wav") => new Request("http://localhost/api/stt/openai", {
 	method: "POST", headers: { "content-type": contentType }, body,
@@ -58,13 +61,14 @@ describe("OpenAI transcription route", () => {
 	it("uses the configured API key and current transcription model, returning only text", async () => {
 		let calls = 0;
 		const res = await transcribeOpenAIDictation(request(makeWav()), {
-			apiKey: key, enabled: true, fetchFn: async (url, init) => {
+			...openai, apiKey: key, enabled: true, fetchFn: async (url, init) => {
 				calls++;
 				assert.equal(String(url), "https://api.openai.com/v1/audio/transcriptions");
 				assert.equal(init?.method, "POST");
 				assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${key}`);
 				const form = init?.body as FormData;
 				assert.equal(form.get("model"), "gpt-transcribe");
+				assert.equal(form.get("language"), "en");
 				const file = form.get("file") as File;
 				assert.equal(file.name, "dictation.wav");
 				assert.equal(file.type, "audio/wav");
@@ -82,14 +86,17 @@ describe("OpenAI transcription route", () => {
 	it("does not call OpenAI without explicit provider selection or an API key", async () => {
 		let calls = 0;
 		const fetchFn = async () => { calls++; return Response.json({}); };
-		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { apiKey: key, enabled: false, fetchFn })).status, 403);
-		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { apiKey: undefined, enabled: true, fetchFn })).status, 503);
+		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: key, enabled: false, fetchFn })).status, 403);
+		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: undefined, enabled: true, fetchFn })).status, 503);
+		const noServer = await transcribeOpenAIDictation(request(makeWav()), { ...openai, ...dictationConnection({ customEndpoint: true }), apiKey: undefined, enabled: true, fetchFn });
+		assert.equal(noServer.status, 503, "a custom endpoint without a server never falls back to OpenAI");
+		assert.match((await noServer.json() as { message: string }).message, /No server URL/);
 		assert.equal(calls, 0);
 	});
 
 	it("rejects malformed, oversized or incorrectly typed audio before dispatch", async () => {
 		let calls = 0;
-		const deps = { apiKey: key, enabled: true, fetchFn: async () => { calls++; return Response.json({}); } };
+		const deps = { ...openai, apiKey: key, enabled: true, fetchFn: async () => { calls++; return Response.json({}); } };
 		assert.equal((await transcribeOpenAIDictation(request(makeWav(), "application/json"), deps)).status, 415);
 		assert.equal((await transcribeOpenAIDictation(request(new Blob(["not wav"])), deps)).status, 400);
 		const oversized = new Request("http://localhost/api/stt/openai", { method: "POST", headers: { "content-type": "audio/wav", "content-length": String(MAX_DICTATION_WAV_BYTES + 1) }, body: makeWav() });
@@ -100,10 +107,10 @@ describe("OpenAI transcription route", () => {
 	});
 
 	it("redacts upstream errors and rejects malformed transcription responses", async () => {
-		const failed = await transcribeOpenAIDictation(request(makeWav()), { apiKey: key, enabled: true, fetchFn: async () => new Response(`echo ${key}`, { status: 429 }) });
+		const failed = await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: key, enabled: true, fetchFn: async () => new Response(`echo ${key}`, { status: 429 }) });
 		assert.equal(failed.status, 502);
 		assert.doesNotMatch(await failed.text(), /sk-test-openai-only/);
-		const malformed = await transcribeOpenAIDictation(request(makeWav()), { apiKey: key, enabled: true, fetchFn: async () => Response.json({}) });
+		const malformed = await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: key, enabled: true, fetchFn: async () => Response.json({}) });
 		assert.equal(malformed.status, 502);
 	});
 });

@@ -1,20 +1,17 @@
 "use client";
 
 /**
- * Settings → Speech (listen wave, 2026-10-26): the OpenAI-compatible
- * text-to-speech endpoint the session's listen affordances read through.
- * Listening is opt-in. The key row picks a saved provider key (default
- * OpenAI) or a custom inline key; server and model sit under Advanced
- * (the model picker lists the server's /models).
+ * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
+ * session's listen affordances read through. Listening is opt-in. OpenAI
+ * with your OpenAI key by default; Advanced switches to a custom
+ * OpenAI-compatible endpoint (audio-endpoint.tsx).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
-import { resolveSettings, type SpeechSettings } from "@/src/core";
+import { DEFAULT_TTS_MODEL, resolveSettings, TTS_KEY_ID, type SpeechSettings } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { CommitInput, SettingsRow, Toggle } from "./controls";
-import { AudioKeyRow } from "./audio-key-row";
-import { ModelCombobox } from "./model-combobox";
+import { AudioEndpoint } from "./audio-endpoint";
 
 const SAMPLE = "This is how LearnHarness will read to you.";
 // Follow the content pane's width: the settings sidebar also takes space
@@ -54,7 +51,7 @@ export function SpeechSection({
 		return () => {
 			live = false;
 		};
-	}, [tick, resolved.baseUrl, resolved.enabled]);
+	}, [tick, resolved.enabled]);
 
 	const stopSample = useCallback(() => {
 		const current = sample.current;
@@ -110,8 +107,6 @@ export function SpeechSection({
 		}
 	};
 
-	const commit = (key: "baseUrl" | "model" | "voice") => (value: string) => onSectionChange({ ...speech, [key]: value || undefined });
-
 	return (
 		<div className="@container/speech flex flex-col gap-3">
 			<SettingsRow label="Listening" hint="Show reading controls" testid="speech-row-enabled">
@@ -134,7 +129,7 @@ export function SpeechSection({
 					ariaLabel="speech voice"
 					testid="input-speech-voice"
 					className="w-full @xl/speech:w-40 @xl/speech:shrink-0"
-					onCommit={commit("voice")}
+					onCommit={(voice) => onSectionChange({ ...speech, voice: voice || undefined })}
 				/>
 			</SettingsRow>
 			<SettingsRow
@@ -154,44 +149,14 @@ export function SpeechSection({
 					{test.state === "loading" ? "Loading…" : test.state === "playing" ? "Playing…" : "Play sample"}
 				</button>
 			</SettingsRow>
-			<AudioKeyRow
-				keySource={resolved.keySource}
-				customKeyId="TTS_API_KEY"
-				onKeySourceChange={(keySource) => onSectionChange({ ...speech, keySource })}
+			<AudioEndpoint
+				settings={speech}
+				defaultModel={DEFAULT_TTS_MODEL}
+				customKeyId={TTS_KEY_ID}
+				onChange={(patch) => onSectionChange({ ...speech, ...patch })}
 				onOpenKey={onOpenKey}
-				testid="speech-row-key"
+				testid="speech-endpoint"
 			/>
-			<details className="group border-t border-border/60 pt-3" data-testid="speech-advanced-connection">
-				<summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
-					<ChevronRight aria-hidden="true" className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-					Advanced connection
-				</summary>
-				<div className="mt-3 flex flex-col gap-3">
-					<SettingsRow label="Server" hint="OpenAI-compatible base URL, version segment included" testid="speech-row-base-url" className={FIELD_ROW}>
-						<CommitInput
-							value={speech?.baseUrl ?? ""}
-							placeholder={resolved.baseUrl}
-							ariaLabel="speech server base URL"
-							testid="input-speech-base-url"
-							wide
-							className="w-full @xl/speech:w-64 @xl/speech:shrink-0"
-							onCommit={commit("baseUrl")}
-						/>
-					</SettingsRow>
-					<SettingsRow label="Model" testid="speech-row-model" className={FIELD_ROW}>
-						<ModelCombobox
-							value={speech?.model ?? ""}
-							defaultModel={resolveSettings(null).speech.model}
-							endpoint="/api/tts/openai/models"
-							section="speech"
-							ariaLabel="speech model"
-							testid="input-speech-model"
-							className="w-full @xl/speech:w-64 @xl/speech:shrink-0"
-							onCommit={commit("model")}
-						/>
-					</SettingsRow>
-				</div>
-			</details>
 		</div>
 	);
 }
