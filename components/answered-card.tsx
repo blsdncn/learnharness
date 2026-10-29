@@ -5,6 +5,7 @@ import { ConfidenceRail } from "@/components/confidence-rail";
 import { useListen } from "@/components/listen/listen";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
+import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
@@ -175,7 +176,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 							data-testid="answered-other"
 							className="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"
 						>
-							<span>“{answer.other}”</span>
+							<span>“<PathText text={answer.other} />”</span>
 						</div>
 					)}
 				</div>
@@ -183,7 +184,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 
 			{answer.text && (
 				<div ref={yourAnswerRef} className="lh-prose mt-2 whitespace-pre-wrap" data-listen-block="Your answer">
-					“{answer.text}”
+					“<PathText text={answer.text} />”
 				</div>
 			)}
 

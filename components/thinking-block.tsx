@@ -5,6 +5,7 @@ import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
 import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
+import { PathText } from "@/components/file-path-chip";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
  *  language for every surface where the learner's own thinking renders —
@@ -137,7 +138,7 @@ export function ThinkingBlock({
 					className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"
 					data-listen-block={listenLabel}
 				>
-					{text}
+					<PathText text={text} />
 				</span>
 			)}
 		</div>

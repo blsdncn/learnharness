@@ -36,6 +36,8 @@ import {
 	type FactorySettings,
 	type GeneralSettings,
 	type CompactionSettings,
+	type CustomModel,
+	type CustomModelOverride,
 	type GraphSettings,
 	type ModelSlot,
 	type ModelSlotName,
@@ -99,6 +101,9 @@ export interface EffectiveSettings {
 	compaction: Required<CompactionSettings>;
 	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is on. */
 	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean; autoplay: boolean } & AudioConnection;
+	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
+	 *  user pins default to empty. */
+	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -233,6 +238,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			readQuestion: record?.speech?.readQuestion ?? false,
 			autoplay: record?.speech?.autoplay ?? false,
 			...ttsConnection(record?.speech),
+		},
+		customProvider: {
+			baseUrl: record?.customProvider?.baseUrl ?? "",
+			models: record?.customProvider?.models ?? [],
+			overrides: record?.customProvider?.overrides ?? {},
+			manualModels: record?.customProvider?.manualModels ?? [],
 		},
 	};
 }

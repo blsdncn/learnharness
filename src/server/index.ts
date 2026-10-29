@@ -49,3 +49,8 @@ export { sessionCost } from "./pricing.ts";
 // Speech (listen wave, 2026-10-26): OpenAI-compatible TTS behind /api/tts/openai.
 export * from "./speech.ts";
 export * from "./openai-dictation.ts";
+export { claudeCodeInstallationResponse } from "./claude-code.ts";
+// The custom endpoint module (registers into piModels() + probes for models).
+// No import side effects; the boot sync lives in stores.ts.
+export * from "./custom-provider.ts";
+export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";

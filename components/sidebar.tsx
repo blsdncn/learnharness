@@ -50,6 +50,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  */
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge, RemoteAccessBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
+import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -61,6 +62,8 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			/** Resolve an OS-backed File without copying/uploading its contents. */
+			getPathForFile?: (file: File) => string;
 			/** External Next desktop-dev uses the server's web connections. */
 			subscriptionTransport?: "desktop" | "web";
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
@@ -1036,7 +1039,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 		<SettingsDialogProvider>
 			{drawer && open && <button type="button" aria-label="Close session menu" className="fixed inset-0 z-30 bg-background/80" onClick={close} />}
 			<SessionsSidebar />
-			<main className="min-w-0 flex-1" inert={drawer && open ? true : undefined}>{children}</main>
+			<FilePathDropZone className="relative min-w-0 flex-1" inert={drawer && open ? true : undefined}>{children}</FilePathDropZone>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}
