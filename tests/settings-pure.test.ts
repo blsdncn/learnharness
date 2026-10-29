@@ -258,11 +258,11 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 		assert.ok(!out.toolRows[1]!.present);
 	});
 
-	it("the inline TTS / dictation custom keys never appear in Providers", () => {
+	it("the TTS / dictation custom endpoint keys never appear as Providers rows", () => {
 		for (const catalog of [providers, undefined]) {
-			const out = classifyKeys([synth("TTS_API_KEY", true), synth("STT_API_KEY", true)], catalog);
+			const out = classifyKeys([synth("CUSTOM_TTS_API_KEY", true), synth("CUSTOM_STT_API_KEY", true)], catalog);
 			const ids = [...out.toolRows, ...out.providerRows, ...out.unknownRows].map((r) => r.id);
-			assert.ok(!ids.includes("TTS_API_KEY") && !ids.includes("STT_API_KEY"), String(ids));
+			assert.ok(!ids.includes("CUSTOM_TTS_API_KEY") && !ids.includes("CUSTOM_STT_API_KEY"), String(ids));
 		}
 	});
 

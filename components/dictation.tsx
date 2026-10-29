@@ -109,7 +109,8 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
 export const OPENAI_DICTATION_KEYLESS = "OpenAI dictation needs an OpenAI API key — add one in Providers";
-export const OPENAI_DICTATION_NO_SERVER = "Set the custom dictation server in Providers → Dictation → Advanced";
+export const OPENAI_DICTATION_NO_SERVER = "Add a custom dictation endpoint in Providers → Dictation";
+export const CUSTOM_DICTATION_NO_MODEL = "Pick a dictation model in Providers → Dictation";
 
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
@@ -423,13 +424,18 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		pcmRef.current = []; pcmBytesRef.current = 0; limitReachedRef.current = false;
 		const gen = ++genRef.current;
 		try {
-			const { language, provider, section } = await getSetup();
+			const { language, provider, section, endpoint } = await getSetup();
 			if (gen !== genRef.current) return;
-			const { language: _, ...connection } = resolveSettings({ version: 1, dictation: section }).dictation;
+			const { language: _, ...connection } = resolveSettings({
+				version: 1, general: { dictationProvider: provider }, dictation: section, customSttProvider: endpoint,
+			}).dictation;
 			providerRef.current = provider;
 			connectionRef.current = connection;
-			if (provider === "openai" && !connection.baseUrl) throw new Error(OPENAI_DICTATION_NO_SERVER);
-			if (provider === "openai" && !connection.custom) {
+			// OpenAI and custom both record, then upload one WAV on stop.
+			const uploads = provider !== "deepgram";
+			if (uploads && !connection.baseUrl) throw new Error(OPENAI_DICTATION_NO_SERVER);
+			if (uploads && !connection.model) throw new Error(CUSTOM_DICTATION_NO_MODEL);
+			if (provider === "openai") {
 				const keys = await fetch("/api/keys", { cache: "no-store" });
 				if (!keys.ok) throw new Error("Could not check the OpenAI API key");
 				const body = await keys.json() as { keys?: { id: string; present: boolean }[] };
@@ -446,7 +452,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const { ctx, module } = ensureAudioGraph();
 			await module;
 			if (ctx.state === "suspended") await ctx.resume();
-			if (provider === "openai" && ctx.sampleRate !== 16000) throw new Error("This microphone cannot capture 16 kHz audio");
+			if (uploads && ctx.sampleRate !== 16000) throw new Error("This microphone cannot capture 16 kHz audio");
 			if (gen !== genRef.current) return;
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
@@ -456,7 +462,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				if (msg.type === "level") { levelRef.current = msg.rms ?? 0; return; }
 				if (msg.type === "flushed") { flushCaptureRef.current?.(); return; }
 				if (msg.type !== "audio" || !msg.buffer) return;
-				if (provider === "openai") {
+				if (uploads) {
 					const bytes = msg.buffer instanceof ArrayBuffer
 						? new Uint8Array(msg.buffer) : new Uint8Array(msg.buffer.buffer, msg.buffer.byteOffset, msg.buffer.byteLength);
 					if (pcmBytesRef.current + bytes.byteLength + WAV_HEADER_BYTES > MAX_DICTATION_WAV_BYTES) {
@@ -477,7 +483,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			};
 			const source = ctx.createMediaStreamSource(stream);
 			sourceRef.current = source; source.connect(worklet); worklet.connect(ctx.destination);
-			if (provider === "openai") { setRunPhase("recording"); return; }
+			if (uploads) { setRunPhase("recording"); return; }
 			const token = await tokenPromise!;
 			if (gen === genRef.current) openSocket(gen, token, language);
 		} catch (e) {
@@ -496,7 +502,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect(); sourceRef.current = null;
-		if (providerRef.current === "openai") {
+		if (providerRef.current === "openai" || providerRef.current === "custom") {
 			const worklet = workletRef.current;
 			if (!worklet) { setError("No audio was captured"); cleanup(false); return; }
 			flushCaptureRef.current = () => {
@@ -602,7 +608,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). OpenAI's
 	 *  missing key / missing custom server land in Providers the same way. */
-	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS || error === OPENAI_DICTATION_NO_SERVER;
+	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS || error === OPENAI_DICTATION_NO_SERVER || error === CUSTOM_DICTATION_NO_MODEL;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	const recording = phase === "recording" || phase === "stopping";
 	/** Adaptive cell count (owner round 2): derived from the meter's

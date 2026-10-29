@@ -33,8 +33,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage, type DictationSettings } from "./dictation.ts";
-import type { AudioEndpointSettings } from "./audio-connection.ts";
+import { isDictationLanguage, type DictationLanguage, type DictationProvider, type DictationSettings } from "./dictation.ts";
 export type { DictationSettings };
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -331,7 +330,7 @@ export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
 	/** The explicit speech-to-text provider; connection settings live independently. */
-	dictationProvider?: "deepgram" | "openai";
+	dictationProvider?: DictationProvider;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -457,11 +456,16 @@ export interface CompactionSettings {
 
 /**
  * Text-to-speech through `POST {baseUrl}/audio/speech`: OpenAI by default,
- * or a custom OpenAI-compatible endpoint (see core/audio-connection.ts).
+ * or the TTS custom endpoint (top-level customTtsProvider — connected
+ * through its own route, never this section; see core/audio-connection.ts).
  * Secrets stay in the key store; these settings contain only non-secret
  * preferences.
  */
-export interface SpeechSettings extends AudioEndpointSettings {
+export interface SpeechSettings {
+	/** Unset = OpenAI. */
+	provider?: "openai" | "custom";
+	/** The custom endpoint's model, picked from its list. */
+	customModel?: string;
 	/** Listening is opt-in: unset = off. */
 	enabled?: boolean;
 	voice?: string;
@@ -485,6 +489,10 @@ export interface UserSettings {
 	models?: ModelsSettings;
 	/** The custom OpenAI-compatible endpoint (non-secret config only). */
 	customProvider?: CustomProviderSettings;
+	/** The TTS and dictation custom endpoints: the same non-secret config
+	 *  shape, connected through their own routes (never a PUT section). */
+	customTtsProvider?: CustomProviderSettings;
+	customSttProvider?: CustomProviderSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
@@ -567,7 +575,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
-	if (raw.dictationProvider === "deepgram" || raw.dictationProvider === "openai") out.dictationProvider = raw.dictationProvider;
+	if (raw.dictationProvider === "deepgram" || raw.dictationProvider === "openai" || raw.dictationProvider === "custom") out.dictationProvider = raw.dictationProvider;
 	return out;
 }
 
@@ -801,22 +809,6 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
-/** An http(s) URL normalized without its trailing slash (paths are
- *  appended as `${baseUrl}/audio/speech`), or null when it isn't one.
- *  Exported for the PUT parser's reject-with-rationale. */
-export function normalizeSpeechBaseUrl(value: string): string | null {
-	const trimmed = value.trim();
-	let url: URL;
-	try {
-		url = new URL(trimmed);
-	} catch {
-		return null;
-	}
-	if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-	if (url.username || url.password || url.search || url.hash) return null;
-	return url.toString().replace(/\/+$/, "");
-}
-
 /** Model and voice ids: trimmed, non-empty, bounded (ids, not prose). */
 export const SPEECH_ID_MAX = 200;
 
@@ -824,19 +816,6 @@ function sanitizeSpeechId(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const value = raw.trim();
 	return value.length > 0 && value.length <= SPEECH_ID_MAX ? value : undefined;
-}
-
-function sanitizeAudioEndpoint(raw: Record<string, unknown>): AudioEndpointSettings {
-	const out: AudioEndpointSettings = {};
-	const customEndpoint = boolOrDrop(raw.customEndpoint);
-	if (customEndpoint !== undefined) out.customEndpoint = customEndpoint;
-	if (typeof raw.baseUrl === "string") {
-		const baseUrl = normalizeSpeechBaseUrl(raw.baseUrl);
-		if (baseUrl) out.baseUrl = baseUrl;
-	}
-	const model = sanitizeSpeechId(raw.model);
-	if (model) out.model = model;
-	return out;
 }
 
 function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
@@ -849,13 +828,18 @@ function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
 	if (readQuestion !== undefined) out.readQuestion = readQuestion;
 	const autoplay = boolOrDrop(raw.autoplay);
 	if (autoplay !== undefined) out.autoplay = autoplay;
-	return { ...out, ...sanitizeAudioEndpoint(raw) };
+	if (raw.provider === "openai" || raw.provider === "custom") out.provider = raw.provider;
+	const customModel = sanitizeSpeechId(raw.customModel);
+	if (customModel) out.customModel = customModel;
+	return out;
 }
 
 function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
 	const out: DictationSettings = {};
 	if (isDictationLanguage(raw.language)) out.language = raw.language;
-	return { ...out, ...sanitizeAudioEndpoint(raw) };
+	const customModel = sanitizeSpeechId(raw.customModel);
+	if (customModel) out.customModel = customModel;
+	return out;
 }
 
 /**
@@ -891,6 +875,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
 		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
+	}
+	for (const key of ["customTtsProvider", "customSttProvider"] as const) {
+		const value = r[key];
+		if (value !== null && typeof value === "object" && !Array.isArray(value)) out[key] = sanitizeCustomProvider(value as Record<string, unknown>);
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);

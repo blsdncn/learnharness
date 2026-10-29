@@ -1,4 +1,3 @@
-import type { AudioEndpointSettings } from "./audio-connection.ts";
 
 /** Nova-3 monolingual language codes, including documented locale aliases.
  * Source: https://developers.deepgram.com/docs/models-languages-overview
@@ -91,12 +90,15 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 		`&language=${encodeURIComponent(language)}`;
 }
 
-export type DictationProvider = "deepgram" | "openai";
+/** OpenAI and custom both upload a recording to `{base}/audio/transcriptions`. */
+export type DictationProvider = "deepgram" | "openai" | "custom";
 
-/** The app-wide dictation preferences: the language (both providers), and
- *  the OpenAI connection (see core/audio-connection.ts). */
-export interface DictationSettings extends AudioEndpointSettings {
+/** The app-wide dictation preferences: the language (every provider), and
+ *  the model picked from the custom endpoint (top-level customSttProvider;
+ *  see core/audio-connection.ts). */
+export interface DictationSettings {
 	language?: DictationLanguage;
+	customModel?: string;
 }
 
 /** OpenAI's `language` takes an ISO-639-1 code: the language part of the

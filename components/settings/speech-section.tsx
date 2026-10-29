@@ -4,16 +4,23 @@
  * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
  * session's listen affordances read through. Listening is opt-in, and so
  * is reading on from the transcript into the dock's question, and
- * autoplaying replies. OpenAI
- * with your OpenAI key by default; Advanced switches to a custom
- * OpenAI-compatible endpoint (audio-endpoint.tsx).
+ * autoplaying replies. The provider (OpenAI, or the TTS custom endpoint)
+ * is chosen in Providers → TTS; this page names it and links there.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_TTS_MODEL, resolveSettings, TTS_KEY_ID, type SpeechSettings } from "@/src/core";
+import { resolveSettings, type SpeechSettings } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { CommitInput, SettingsRow, Toggle } from "./controls";
-import { AudioEndpoint } from "./audio-endpoint";
+
+/** GET /api/tts/openai's readiness fields this page reads. */
+interface SpeechReadiness {
+	configured: boolean;
+	keyPresent: boolean;
+	custom: boolean;
+	baseUrl: string | null;
+	model: string | null;
+}
 
 const SAMPLE = "This is how LearnHarness will read to you.";
 // Follow the content pane's width: the settings sidebar also takes space
@@ -23,15 +30,15 @@ const FIELD_ROW = "flex-col items-stretch gap-2 @xl/speech:flex-row @xl/speech:i
 export function SpeechSection({
 	speech,
 	onSectionChange,
-	onOpenKey,
+	onOpenProviders,
 }: {
 	speech: SpeechSettings | undefined;
 	onSectionChange: (next: SpeechSettings) => void;
-	/** Open Providers on a key (its paste field when unsaved). */
-	onOpenKey: (id: string) => void;
+	/** Open Providers (its TTS group holds the provider and endpoint). */
+	onOpenProviders: () => void;
 }) {
 	const resolved = resolveSettings(speech === undefined ? null : { version: 1, speech }).speech;
-	const [status, setStatus] = useState<{ configured: boolean } | null>(null);
+	const [status, setStatus] = useState<SpeechReadiness | null>(null);
 	const sample = useRef<{ abort: AbortController; audio?: HTMLAudioElement; url?: string } | null>(null);
 	const [tick, setTick] = useState(0);
 	const [test, setTest] = useState<{ state: "idle" | "loading" | "playing" } | { state: "error"; message: string }>({
@@ -46,9 +53,15 @@ export function SpeechSection({
 		void (async () => {
 			const response = (await fetch("/api/tts/openai")
 				.then((r) => r.ok ? r.json() : null)
-				.catch(() => null)) as { configured?: boolean } | null;
+				.catch(() => null)) as Partial<SpeechReadiness> | null;
 			if (!live) return;
-			setStatus(response ? { configured: response.configured === true } : null);
+			setStatus(response ? {
+				configured: response.configured === true,
+				keyPresent: response.keyPresent === true,
+				custom: response.custom === true,
+				baseUrl: response.baseUrl ?? null,
+				model: response.model ?? null,
+			} : null);
 		})();
 		return () => {
 			live = false;
@@ -109,8 +122,30 @@ export function SpeechSection({
 		}
 	};
 
+	const custom = speech?.provider === "custom";
+	const problem = status === null ? null
+		: !custom ? (status.keyPresent ? null : "No OpenAI API key")
+		: !status.baseUrl ? "No custom endpoint connected"
+		: !status.model ? "No model chosen"
+		: !status.keyPresent ? "The endpoint needs reconnecting"
+		: null;
+
 	return (
 		<div className="@container/speech flex flex-col gap-3">
+			<SettingsRow
+				label="Provider"
+				testid="speech-row-provider"
+				hint={<>
+					{problem && <span data-testid="speech-provider-problem" className="text-destructive">{problem} · </span>}
+					<button type="button" data-testid="speech-open-providers" onClick={onOpenProviders} className="text-left underline-offset-2 hover:underline">
+						Change in Providers →
+					</button>
+				</>}
+			>
+				<span data-testid="speech-provider" className="font-ui text-xs text-muted-foreground">
+					{custom ? `Custom endpoint${speech?.customModel ? ` · ${speech.customModel}` : ""}` : "OpenAI"}
+				</span>
+			</SettingsRow>
 			<SettingsRow label="Listening" hint="Show reading controls" testid="speech-row-enabled">
 				<Toggle
 					checked={speech?.enabled ?? status?.configured ?? false}
@@ -165,14 +200,6 @@ export function SpeechSection({
 					{test.state === "loading" ? "Loading…" : test.state === "playing" ? "Playing…" : "Play sample"}
 				</button>
 			</SettingsRow>
-			<AudioEndpoint
-				settings={speech}
-				defaultModel={DEFAULT_TTS_MODEL}
-				customKeyId={TTS_KEY_ID}
-				onChange={(patch) => onSectionChange({ ...speech, ...patch })}
-				onOpenKey={onOpenKey}
-				testid="speech-endpoint"
-			/>
 		</div>
 	);
 }

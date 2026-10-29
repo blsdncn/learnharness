@@ -37,19 +37,6 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{
-		id: "TTS_API_KEY",
-		label: "Text-to-speech",
-		description:
-			"Key for a custom text-to-speech endpoint, entered in Settings → TTS → Advanced. Optional for servers that do not require authentication.",
-		docsUrl: "https://platform.openai.com/api-keys",
-	},
-	{
-		id: "STT_API_KEY",
-		label: "Dictation",
-		description: "Key for a custom dictation endpoint, entered in Providers → Dictation → Advanced. Optional for keyless servers.",
-		docsUrl: "https://platform.openai.com/api-keys",
-	},
-	{
 		id: "TAVILY_API_KEY",
 		label: "Tavily",
 		description: "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed.",
@@ -190,11 +177,6 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
-		case "TTS_API_KEY":
-		case "STT_API_KEY":
-			// Any OpenAI-compatible server — no shared family; paste hygiene only
-			// (the model-provider floor).
-			return nonEmpty(12);
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

@@ -33,11 +33,9 @@ import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	MODEL_SLOTS,
 	SPEECH_ID_MAX,
-	normalizeSpeechBaseUrl,
 } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
-import type { AudioEndpointSettings } from "../core/audio-connection.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -100,8 +98,8 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 		settings.autoUpdate = raw.autoUpdate;
 	}
 	if (raw.dictationProvider !== undefined) {
-		if (raw.dictationProvider !== "deepgram" && raw.dictationProvider !== "openai") {
-			return { ok: false, error: 'dictationProvider must be "deepgram" or "openai"' };
+		if (raw.dictationProvider !== "deepgram" && raw.dictationProvider !== "openai" && raw.dictationProvider !== "custom") {
+			return { ok: false, error: 'dictationProvider must be "deepgram", "openai" or "custom"' };
 		}
 		settings.dictationProvider = raw.dictationProvider;
 	}
@@ -403,27 +401,6 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** The custom-endpoint knobs TTS and dictation share. Strict write side:
- *  customEndpoint is a boolean; a present baseUrl must be an http(s) URL
- *  (stored without its trailing slash); a present model must be a
- *  non-empty id. An empty string clears the field. */
-function parseAudioEndpoint(raw: Record<string, unknown>): SettingsBodyResult<AudioEndpointSettings> {
-	const settings: AudioEndpointSettings = {};
-	if (raw.customEndpoint !== undefined) {
-		if (typeof raw.customEndpoint !== "boolean") return { ok: false, error: "customEndpoint must be a boolean" };
-		settings.customEndpoint = raw.customEndpoint;
-	}
-	if (raw.baseUrl !== undefined && raw.baseUrl !== "") {
-		const baseUrl = typeof raw.baseUrl === "string" ? normalizeSpeechBaseUrl(raw.baseUrl) : null;
-		if (!baseUrl) return { ok: false, error: "baseUrl must be an http(s) URL without credentials, a query, or a fragment, e.g. http://127.0.0.1:8000/v1" };
-		settings.baseUrl = baseUrl;
-	}
-	const model = parseSpeechId(raw, "model");
-	if (!model.ok) return model;
-	if (model.settings) settings.model = model.settings;
-	return { ok: true, settings };
-}
-
 function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyResult<string | undefined> {
 	const value = raw[key];
 	if (value === undefined || value === "") return { ok: true, settings: undefined };
@@ -434,8 +411,9 @@ function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyR
 }
 
 /** speech (listen wave, 2026-10-26): listening, the voice, reading into
- *  the question, autoplay, and the custom
- *  endpoint. Replace-whole, like every section. */
+ *  the question, autoplay, the provider and the custom endpoint's model.
+ *  The endpoint itself connects via /api/tts/custom-endpoint, never here.
+ *  Replace-whole, like every section. */
 export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<SpeechSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -452,13 +430,19 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 	const voice = parseSpeechId(raw, "voice");
 	if (!voice.ok) return voice;
 	if (voice.settings) settings.voice = voice.settings;
-	const endpoint = parseAudioEndpoint(raw);
-	if (!endpoint.ok) return endpoint;
-	return { ok: true, settings: { ...settings, ...endpoint.settings } };
+	if (raw.provider !== undefined) {
+		if (raw.provider !== "openai" && raw.provider !== "custom") return { ok: false, error: 'provider must be "openai" or "custom"' };
+		settings.provider = raw.provider;
+	}
+	const model = parseSpeechId(raw, "customModel");
+	if (!model.ok) return model;
+	if (model.settings) settings.customModel = model.settings;
+	return { ok: true, settings };
 }
 
-/** dictation: the language (one of Nova-3's codes; OpenAI gets its
- *  language part) and the OpenAI custom endpoint. */
+/** dictation: the language (one of Nova-3's codes; OpenAI-shape uploads
+ *  get its language part) and the custom endpoint's model. The endpoint
+ *  itself connects via /api/stt/custom-endpoint, never here. */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -467,9 +451,10 @@ export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<Di
 		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
 		settings.language = raw.language;
 	}
-	const endpoint = parseAudioEndpoint(raw);
-	if (!endpoint.ok) return endpoint;
-	return { ok: true, settings: { ...settings, ...endpoint.settings } };
+	const model = parseSpeechId(raw, "customModel");
+	if (!model.ok) return model;
+	if (model.settings) settings.customModel = model.settings;
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the

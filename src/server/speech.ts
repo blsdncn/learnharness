@@ -1,8 +1,9 @@
 /**
  * Speech (listen wave, 2026-10-26): text-to-speech through the OpenAI shape —
  * `POST {baseUrl}/audio/speech` with {model, voice, input, response_format}
- * returning audio bytes. OpenAI by default; a custom endpoint (any
- * compatible hosted or local server) uses the same request
+ * returning audio bytes. OpenAI by default; the TTS custom endpoint (any
+ * compatible hosted or local server, connected in Settings → Providers →
+ * TTS with its key bound to its URL) uses the same request
  * (core/audio-connection.ts).
  *
  * The key never reaches the browser (the Deepgram precedent): the client
@@ -18,18 +19,23 @@
 
 import katex from "katex";
 import { normalizeSpokenText, splitSpokenText, type SpeechPart } from "../core/speech.ts";
+import { OPENAI_AUDIO_KEY_ID } from "../core/audio-connection.ts";
+import { TTS_ENDPOINT } from "../core/custom-provider-auth.ts";
+import { readSettings } from "../store/settings.ts";
+import { customEndpointCredential } from "./custom-provider-auth.ts";
 import { keyValue } from "./keys.ts";
 import { effectiveSettings } from "./stores.ts";
 
 export interface SpeechStatus {
 	/** Listening is enabled; this is not a provider readiness check. */
 	configured: boolean;
-	/** The connection's key has a saved value. */
+	/** OpenAI: its key has a value. Custom: the endpoint's credential is
+	 *  authorized for its URL (or it's keyless). */
 	keyPresent: boolean;
-	/** The custom endpoint is on (otherwise OpenAI). */
+	/** The custom endpoint is the provider (otherwise OpenAI). */
 	custom: boolean;
 	baseUrl: string | null;
-	model: string;
+	model: string | null;
 	voice: string;
 	/** Read from here continues into the dock (Settings → TTS). */
 	readQuestion: boolean;
@@ -37,9 +43,17 @@ export interface SpeechStatus {
 	autoplay: boolean;
 }
 
+/** The key one request may send: OpenAI's from Providers, or the custom
+ *  endpoint's bound credential (undefined apiKey = keyless). */
+function speechCredential(custom: boolean): { ok: true; apiKey?: string } | { ok: false } {
+	if (custom) return customEndpointCredential(TTS_ENDPOINT, readSettings()?.customTtsProvider);
+	const apiKey = keyValue(OPENAI_AUDIO_KEY_ID);
+	return apiKey ? { ok: true, apiKey } : { ok: false };
+}
+
 export function speechStatus(): SpeechStatus {
-	const { enabled, voice, readQuestion, autoplay, custom, baseUrl, model, keyId } = effectiveSettings().speech;
-	return { configured: enabled ?? false, keyPresent: Boolean(keyValue(keyId)), custom, baseUrl, model, voice, readQuestion, autoplay };
+	const { enabled, voice, readQuestion, autoplay, custom, baseUrl, model } = effectiveSettings().speech;
+	return { configured: enabled ?? false, keyPresent: speechCredential(custom).ok, custom, baseUrl, model, voice, readQuestion, autoplay };
 }
 
 /** A refusal carrying the HTTP status the route should answer with. */
@@ -110,13 +124,15 @@ export async function spokenText(parts: readonly SpeechPart[]): Promise<string> 
 
 // ─── synthesis ───────────────────────────────────────────────────────────────
 
-async function requestSpeech(status: SpeechStatus & { baseUrl: string }, apiKey: string | undefined, input: string, signal: AbortSignal): Promise<Response> {
+async function requestSpeech(status: SpeechStatus & { baseUrl: string; model: string }, apiKey: string | undefined, input: string, signal: AbortSignal): Promise<Response> {
 	let res: Response;
 	try {
 		res = await fetch(`${status.baseUrl}/audio/speech`, {
 			method: "POST",
 			headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), "Content-Type": "application/json" },
 			body: JSON.stringify({ model: status.model, voice: status.voice, input, response_format: "mp3" }),
+			// A redirect could carry the bound key to another server.
+			redirect: "error",
 			signal,
 		});
 	} catch (error) {
@@ -128,7 +144,7 @@ async function requestSpeech(status: SpeechStatus & { baseUrl: string }, apiKey:
 		// the status and actionable local configuration guidance.
 		await res.body?.cancel().catch(() => {});
 		const why = res.status === 401 || res.status === 403
-			? status.custom ? " — check the API key in Settings → TTS → Advanced" : " — check the OpenAI key in Settings → Providers"
+			? status.custom ? " — check the custom endpoint's key in Settings → Providers → TTS" : " — check the OpenAI key in Settings → Providers"
 			: "";
 		throw new SpeechError(502, `Speech server answered ${res.status}${why}`);
 	}
@@ -145,15 +161,21 @@ async function requestSpeech(status: SpeechStatus & { baseUrl: string }, apiKey:
 export async function synthesizeSpeech(parts: readonly SpeechPart[], signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
 	const status = speechStatus();
 	if (!status.configured) throw new SpeechError(503, "Listening is off — enable it in Settings → TTS.");
-	const { baseUrl, keyId } = effectiveSettings().speech;
-	if (!baseUrl) throw new SpeechError(503, "No server URL — set one in Settings → TTS → Advanced.");
-	const apiKey = keyValue(keyId);
-	if (!apiKey && !status.custom) throw new SpeechError(503, "No OpenAI API key — add one in Settings → Providers.");
+	const { baseUrl, model } = status;
+	if (!baseUrl) throw new SpeechError(503, "No custom TTS endpoint — add one in Settings → Providers → TTS.");
+	if (!model) throw new SpeechError(503, "No TTS model — pick one in Settings → Providers → TTS.");
+	const credential = speechCredential(status.custom);
+	if (!credential.ok) {
+		throw new SpeechError(503, status.custom
+			? "The custom TTS endpoint isn't authorized — reconnect it in Settings → Providers → TTS."
+			: "No OpenAI API key — add one in Settings → Providers.");
+	}
+	const { apiKey } = credential;
 	const chunks = splitSpokenText(await spokenText(parts));
 	if (chunks.length === 0) throw new SpeechError(400, "nothing to speak");
 	const abort = new AbortController();
 	const upstreamSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
-	const target = { ...status, baseUrl };
+	const target = { ...status, baseUrl, model };
 	const first = await requestSpeech(target, apiKey, chunks[0]!, upstreamSignal);
 	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	let cancelled = false;

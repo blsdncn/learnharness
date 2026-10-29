@@ -38,6 +38,27 @@ Configuration is not a continuous health check. An endpoint may be configured wh
 offline, and model capability or output quality is not proven by listing its ID.
 No backend/model installation, downloads, or OAuth flows are performed.
 
+The form shows where requests go, live from the typed URL: chat calls
+`POST <base>/chat/completions`, and models are listed from `<base>/models`.
+
+## Audio endpoints (TTS and dictation)
+
+TTS and dictation each have one custom endpoint of their own, added from
+**Settings → Providers → TTS** or **→ Dictation** with **+ Add a provider →
+Custom endpoint**. It is the same form and the same rules as above — base URL
+as typed (no `/v1` appended), Keyless or API key, typed model IDs as a
+`/models` fallback, a key never forwarded to a new URL without consent — at
+its own route (`/api/tts/custom-endpoint`, `/api/stt/custom-endpoint`), with
+its own key (`CUSTOM_TTS_API_KEY`, `CUSTOM_STT_API_KEY`) and binding. Its form
+notes the request path: TTS calls `POST <base>/audio/speech`, dictation calls
+`POST <base>/audio/transcriptions`.
+
+Connecting does not switch providers: choose **Custom endpoint** in the
+group's Provider dropdown, then pick the model from the endpoint's list.
+Audio endpoints never become chat providers, carry no budget pins, and are
+independent of the chat endpoint and of each other — a server that serves
+chat, speech and transcription is entered in each place it's used.
+
 ## Model budgets and reasoning support
 
 Settings exposes offline-editable pins per model:

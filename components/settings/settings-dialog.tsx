@@ -33,8 +33,6 @@ import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import {
 	CURRENT_SETTINGS_VERSION,
-	DEFAULT_DICTATION_MODEL,
-	STT_KEY_ID,
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
@@ -55,8 +53,6 @@ import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { SpeechSection } from "./speech-section.tsx";
-import { DictationProviderRow } from "./dictation-provider.tsx";
-import { AudioEndpoint } from "./audio-endpoint.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { RemoteAccessSection } from "./remote-access-section.tsx";
@@ -438,26 +434,21 @@ export function SettingsDialogBody({
 								<SettingsSection title="Providers" testid="section-keys">
 									<KeysSection
 										initialRow={keysRow ?? undefined}
-										dictation={{
-											provider: (
-												<DictationProviderRow
-													provider={record.general?.dictationProvider ?? "deepgram"}
-													onChange={(dictationProvider) => void write("general", (current) => ({ ...current, dictationProvider }))}
-												/>
-											),
-											openai: record.general?.dictationProvider === "openai" ? (
-												<AudioEndpoint
-													settings={record.dictation}
-													defaultModel={DEFAULT_DICTATION_MODEL}
-													customKeyId={STT_KEY_ID}
-													// The language picker saves this section outside the
-													// dialog's record: carry its confirmed choice along.
-													onChange={(patch) => void write("dictation", (current) => ({ ...current, ...(dictationLanguage ? { language: dictationLanguage } : {}), ...patch }))}
-													onOpenKey={(id) => setKeysRow(id)}
-													testid="dictation-endpoint"
-													openAIKeyLine={false}
-												/>
-											) : undefined,
+										audio={{
+											dictation: {
+												provider: record.general?.dictationProvider ?? "deepgram",
+												onProvider: (dictationProvider) => void write("general", (current) => ({ ...current, dictationProvider })),
+												customModel: record.dictation?.customModel,
+												// The language picker saves this section outside the
+												// dialog's record: carry its confirmed choice along.
+												onCustomModel: (customModel) => void write("dictation", (current) => ({ ...current, ...(dictationLanguage ? { language: dictationLanguage } : {}), customModel })),
+											},
+											tts: {
+												provider: record.speech?.provider ?? "openai",
+												onProvider: (provider) => void write("speech", (current) => ({ ...current, provider })),
+												customModel: record.speech?.customModel,
+												onCustomModel: (customModel) => void write("speech", (current) => ({ ...current, customModel })),
+											},
 										}}
 									/>
 								</SettingsSection>
@@ -502,7 +493,7 @@ export function SettingsDialogBody({
 									<SpeechSection
 										speech={record.speech}
 										onSectionChange={(next: SpeechSettings) => void write("speech", next)}
-										onOpenKey={(id) => { setKeysRow(id); setActive("keys"); }}
+										onOpenProviders={() => setActive("keys")}
 									/>
 								</SettingsSection>
 							)}

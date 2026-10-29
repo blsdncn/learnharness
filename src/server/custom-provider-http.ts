@@ -1,11 +1,14 @@
 /** PR #62's connect/manual-model/offline-pin workflow, with host request,
- * credential-binding and optimistic-write boundaries. No secret reaches GET. */
+ * credential-binding and optimistic-write boundaries. No secret reaches GET.
+ * One handler pair per custom endpoint (chat, TTS, dictation): each reads
+ * and writes only its own settings entry, key and binding. Only chat
+ * stores per-model pins and publishes a pi-ai provider. */
 import { createHmac, randomBytes } from "node:crypto";
 import { normalizeBaseUrl, parseModelIds, sanitizeCustomModelOverrides, type CustomProviderSettings } from "../core/settings.ts";
 import { readSettings, writeSettings } from "../store/settings.ts";
 import { readCustomAuth } from "../store/auth.ts";
 import { customAuthState, customKeyAuthorized, persistCustomAuth } from "./custom-provider-auth.ts";
-import type { CustomAuthBinding } from "../core/custom-provider-auth.ts";
+import { CHAT_ENDPOINT, STT_ENDPOINT, TTS_ENDPOINT, type CustomAuthBinding, type CustomEndpointKind } from "../core/custom-provider-auth.ts";
 import { desktopAPIAuthorized } from "./desktop-access.ts";
 import { subscriptionRequestOrigin } from "./web-subscription-http.ts";
 import { discoverModels, mergeManualModels, syncCustomProvider } from "./custom-provider.ts";
@@ -18,28 +21,28 @@ const secret = globals[revisionKey] ??= randomBytes(32);
 const failure = (error: string, status = 400) => Response.json({ error }, { status });
 const stale = () => failure("Custom configuration or credentials changed. Reload configuration and retry.", 409);
 
-function snapshot(inspectKey = false) {
+function snapshot(kind: CustomEndpointKind, inspectKey = false) {
 	const record = readSettings() ?? { version: 1 };
-	const cp = record.customProvider;
+	const cp = record[kind.settingsKey];
 	// Keyless never looks up a key for authentication or revision generation.
 	// An explicit API-key inspection is used only after the user selects that mode.
-	const auth = customAuthState(inspectKey);
+	const auth = customAuthState(inspectKey, undefined, kind);
 	const key = auth.key;
 	// Public revisions contain configuration only, never credential material.
 	// Effective credentials are compared privately across the awaited probe.
-	const etag = `"${createHmac("sha256", secret).update(JSON.stringify([cp ?? null, auth.binding ?? null, auth.readable])).digest("base64url")}"`;
+	const etag = `"${createHmac("sha256", secret).update(JSON.stringify([kind.settingsKey, cp ?? null, auth.binding ?? null, auth.readable])).digest("base64url")}"`;
 	return { record, cp, auth, key, etag };
 }
 
-function response(body: object) {
-	return Response.json(body, { headers: { etag: snapshot().etag, "cache-control": "no-store" } });
+function response(kind: CustomEndpointKind, body: object) {
+	return Response.json(body, { headers: { etag: snapshot(kind).etag, "cache-control": "no-store" } });
 }
 
-export function customProviderGet(request: Request): Response {
+function endpointGet(kind: CustomEndpointKind, request: Request): Response {
 	const inspect = new URL(request.url).searchParams.get("authMode") === "apiKey";
-	const current = snapshot();
-	const s = snapshot(inspect || current.cp?.authMode === "apiKey");
-	return response({
+	const current = snapshot(kind);
+	const s = snapshot(kind, inspect || current.cp?.authMode === "apiKey");
+	return response(kind, {
 		baseUrl: s.cp?.baseUrl ?? "", authMode: s.cp?.authMode ?? "keyless",
 		models: s.cp?.models ?? [], overrides: s.cp?.overrides ?? {}, manualModels: s.cp?.manualModels ?? [],
 		keyPresent: Boolean(s.key), keySource: s.auth.source,
@@ -64,24 +67,24 @@ function authorized(request: Request): boolean {
 /** Auth pair FIRST, matching config nonce SECOND. Any interrupted/failed
  * cross-file publication is durably unusable, including with a real env key.
  * Best-effort rollback restores the entire old pair, never just its secret. */
-function commit(cp: CustomProviderSettings | undefined, binding?: CustomAuthBinding, fileKey?: string): void {
+function commit(kind: CustomEndpointKind, cp: CustomProviderSettings | undefined, binding?: CustomAuthBinding, fileKey?: string): void {
 	const latest = readSettings() ?? { version: 1 };
-	const oldAuth = binding ? readCustomAuth() : undefined;
+	const oldAuth = binding ? readCustomAuth(kind) : undefined;
 	let published = false;
 	try {
-		if (binding) { persistCustomAuth(binding, fileKey); published = true; }
-		const { customProvider: _old, ...rest } = latest;
-		writeSettings(cp ? { ...rest, customProvider: cp } : rest);
+		if (binding) { persistCustomAuth(binding, fileKey, kind); published = true; }
+		const { [kind.settingsKey]: _old, ...rest } = latest;
+		writeSettings(cp ? { ...rest, [kind.settingsKey]: cp } : rest);
 	} catch {
 		if (published && oldAuth) {
-			try { persistCustomAuth(oldAuth.binding, oldAuth.fileKey()); } catch { /* durable nonce mismatch fails closed after restart */ }
+			try { persistCustomAuth(oldAuth.binding, oldAuth.fileKey(), kind); } catch { /* durable nonce mismatch fails closed after restart */ }
 		}
 		throw new Error("Unable to save custom configuration. Reload configuration and retry.");
 	}
-	syncCustomProvider();
+	if (kind === CHAT_ENDPOINT) syncCustomProvider();
 }
 
-export async function customProviderMutation(request: Request): Promise<Response> {
+async function endpointMutation(kind: CustomEndpointKind, request: Request): Promise<Response> {
 	if (!authorized(request)) return failure("Custom configuration requires a trusted same-origin request.", 403);
 	if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") return failure("JSON content-type is required.", 415);
 	try {
@@ -90,20 +93,20 @@ export async function customProviderMutation(request: Request): Promise<Response
 		const body = await readBoundedJson(request, 64 * 1024, request.method === "DELETE");
 		if (!body || typeof body !== "object" || Array.isArray(body)) return failure("Invalid JSON body");
 		const raw = body as Record<string, unknown>;
-		const before = snapshot(raw.authMode === "apiKey");
+		const before = snapshot(kind, raw.authMode === "apiKey");
 		if (!before.auth.readable) return failure("Custom authorization storage is unavailable. No changes were saved.", 500);
 		if (request.headers.get("if-match") !== before.etag) return stale();
 		if (request.method === "DELETE") {
-			commit(undefined, { version: 1, id: randomBytes(16).toString("hex"), authMode: "disabled" });
-			return response({ ok: true });
+			commit(kind, undefined, { version: 1, id: randomBytes(16).toString("hex"), authMode: "disabled" });
+			return response(kind, { ok: true });
 		}
-		if (request.method === "PATCH") {
+		if (request.method === "PATCH" && kind === CHAT_ENDPOINT) {
 			const parsed = parseCustomModelOverridesBody(raw);
 			if (!parsed.ok) return failure(parsed.error);
 			if (!before.cp?.baseUrl) return failure("No custom endpoint configured", 409);
 			const overrides = sanitizeCustomModelOverrides(parsed.settings, before.cp.models?.map((m) => m.id));
-			commit({ ...before.cp, overrides });
-			return response({ ok: true, overrides });
+			commit(kind, { ...before.cp, overrides });
+			return response(kind, { ok: true, overrides });
 		}
 		if (request.method !== "POST") return failure("Unsupported method", 405);
 		const base = normalizeBaseUrl(typeof raw.baseUrl === "string" ? raw.baseUrl : "");
@@ -131,19 +134,27 @@ export async function customProviderMutation(request: Request): Promise<Response
 		if (!found.ok && !manualModels.length) return failure(`${found.error}. If this endpoint has no /models list, add model IDs manually.`, 502);
 		// Discovery yields; both the custom record and the credential must still
 		// match. Unrelated settings edits are preserved by commit's fresh merge.
-		const now = snapshot(authMode === "apiKey");
+		const now = snapshot(kind, authMode === "apiKey");
 		if (before.etag !== now.etag || JSON.stringify(before.auth) !== JSON.stringify(now.auth)) return stale();
 		const discovered = found.ok ? found.models : !changedTarget ? before.cp?.models ?? [] : [];
 		const models = mergeManualModels(discovered, manualModels);
 		if (models.length > 10_000) return failure("Model list exceeds 10000 entries");
-		const overrides = sanitizeCustomModelOverrides(!changedTarget ? before.cp?.overrides : undefined, models.map((m) => m.id));
+		// Pins are chat budgets; audio endpoints store none.
+		const overrides = kind === CHAT_ENDPOINT ? sanitizeCustomModelOverrides(!changedTarget ? before.cp?.overrides : undefined, models.map((m) => m.id)) : {};
 		const id = randomBytes(16).toString("hex");
 		const fileKey = authMode === "keyless" ? undefined : supplied && !envOwned ? supplied : now.auth.fileKey;
 		const fileKeyBaseUrl = authMode === "apiKey" ? envOwned ? now.auth.binding?.fileKeyBaseUrl : base : undefined;
 		const binding: CustomAuthBinding = { version: 1, id, baseUrl: base, authMode, ...(fileKey && fileKeyBaseUrl ? { fileKeyBaseUrl } : {}) };
-		commit({ baseUrl: base, authMode, credentialBindingId: id, models, overrides, ...(manualModels.length ? { manualModels } : {}) }, binding, fileKey);
-		return response({ ok: true, models });
+		commit(kind, { baseUrl: base, authMode, credentialBindingId: id, models, ...(kind === CHAT_ENDPOINT ? { overrides } : {}), ...(manualModels.length ? { manualModels } : {}) }, binding, fileKey);
+		return response(kind, { ok: true, models });
 	} catch (error) {
 		return failure(error instanceof CustomBodyLimitError ? "Configuration body exceeds 64 KiB." : error instanceof SyntaxError ? "Invalid JSON body." : "Unable to save custom configuration. Reload configuration and retry.", error instanceof CustomBodyLimitError ? 413 : error instanceof SyntaxError ? 400 : 500);
 	}
 }
+
+export const customProviderGet = (request: Request) => endpointGet(CHAT_ENDPOINT, request);
+export const customProviderMutation = (request: Request) => endpointMutation(CHAT_ENDPOINT, request);
+export const customTtsEndpointGet = (request: Request) => endpointGet(TTS_ENDPOINT, request);
+export const customTtsEndpointMutation = (request: Request) => endpointMutation(TTS_ENDPOINT, request);
+export const customSttEndpointGet = (request: Request) => endpointGet(STT_ENDPOINT, request);
+export const customSttEndpointMutation = (request: Request) => endpointMutation(STT_ENDPOINT, request);

@@ -73,7 +73,7 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
-	/** The language, and where OpenAI dictation goes. */
+	/** The language, and where an uploaded (OpenAI or custom) recording goes. */
 	dictation: { language: DictationLanguage } & AudioConnection;
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
@@ -99,7 +99,7 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is on. */
+	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is the provider. */
 	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean; autoplay: boolean } & AudioConnection;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
@@ -190,7 +190,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
-			...dictationConnection(record?.dictation),
+			...dictationConnection(record?.general?.dictationProvider, record?.customSttProvider, record?.dictation?.customModel),
 		},
 		agent: {
 			models,
@@ -237,7 +237,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
 			readQuestion: record?.speech?.readQuestion ?? false,
 			autoplay: record?.speech?.autoplay ?? false,
-			...ttsConnection(record?.speech),
+			...ttsConnection(record?.speech?.provider, record?.customTtsProvider, record?.speech?.customModel),
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

@@ -9,7 +9,7 @@ import nextConfig from "../next.config.ts";
 
 const key = "sk-test-openai-only";
 /** The default connection: OpenAI, its model and key. */
-const openai = { ...dictationConnection(undefined), language: "en" as const };
+const openai = { ...dictationConnection(undefined, undefined, undefined), language: "en" as const };
 const makeWav = () => pcm16Wav([new Uint8Array([1, 2, 3, 4]), new Uint8Array([5, 6])]);
 const request = (body: Blob, contentType = "audio/wav") => new Request("http://localhost/api/stt/openai", {
 	method: "POST", headers: { "content-type": contentType }, body,
@@ -88,9 +88,14 @@ describe("OpenAI transcription route", () => {
 		const fetchFn = async () => { calls++; return Response.json({}); };
 		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: key, enabled: false, fetchFn })).status, 403);
 		assert.equal((await transcribeOpenAIDictation(request(makeWav()), { ...openai, apiKey: undefined, enabled: true, fetchFn })).status, 503);
-		const noServer = await transcribeOpenAIDictation(request(makeWav()), { ...openai, ...dictationConnection({ customEndpoint: true }), apiKey: undefined, enabled: true, fetchFn });
-		assert.equal(noServer.status, 503, "a custom endpoint without a server never falls back to OpenAI");
-		assert.match((await noServer.json() as { message: string }).message, /No server URL/);
+		const noServer = await transcribeOpenAIDictation(request(makeWav()), { ...openai, ...dictationConnection("custom", undefined, "m"), apiKey: undefined, enabled: true, fetchFn });
+		assert.equal(noServer.status, 503, "a custom endpoint that isn't connected never falls back to OpenAI");
+		assert.match((await noServer.json() as { message: string }).message, /No custom dictation endpoint/);
+		const noModel = await transcribeOpenAIDictation(request(makeWav()), { ...openai, ...dictationConnection("custom", { baseUrl: "http://local.test/v1" }, undefined), enabled: true, fetchFn });
+		assert.match((await noModel.json() as { message: string }).message, /No dictation model/);
+		const unbound = await transcribeOpenAIDictation(request(makeWav()), { ...openai, ...dictationConnection("custom", { baseUrl: "http://local.test/v1" }, "m"), authorized: false, enabled: true, fetchFn });
+		assert.equal(unbound.status, 503);
+		assert.match((await unbound.json() as { message: string }).message, /isn't authorized — reconnect it/);
 		assert.equal(calls, 0);
 	});
 

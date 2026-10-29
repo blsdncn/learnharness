@@ -15,7 +15,13 @@ import { SettingsDialogBody, SettingsDialogProvider } from "../components/settin
 import nextConfig from "../next.config.ts";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
+Object.assign(globalThis, {
+	window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent,
+	HTMLInputElement: dom.window.HTMLInputElement,
+	// The model menus' MenuShell positions itself on the next frame.
+	requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+	cancelAnimationFrame: clearTimeout,
+});
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 const state = (over: Partial<UpdateState> = {}): UpdateState => ({ status: "idle", version: null, revision: 0, ...over });
@@ -239,13 +245,15 @@ describe("Settings integration", () => {
 		assert.deepEqual(puts, [ { autoUpdate: true, dictationProvider: "openai" }, { autoUpdate: false, dictationProvider: "openai" } ]);
 	});
 
-	it("Providers → Dictation: OpenAI's custom endpoint keeps the language and the section's other fields", async () => {
+	it("Providers → Dictation: Deepgram, OpenAI, or the connected custom endpoint with its model", async () => {
 		bridge();
-		let record: Record<string, unknown> = { version: 1, general: { dictationProvider: "deepgram" }, dictation: { language: "pl", baseUrl: "http://old.test/v1" } };
+		let record: Record<string, unknown> = { version: 1, general: { dictationProvider: "deepgram" }, dictation: { language: "pl" } };
 		const puts: [string, unknown][] = [];
 		globalThis.fetch = async (input, init) => {
 			const url = String(input);
 			if (url === "/api/keys") return Response.json({ keys: [], providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }] });
+			if (url.startsWith("/api/stt/custom-endpoint")) return Response.json({ baseUrl: "http://local.test/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "whisper-large" }, { id: "whisper-local" }], overrides: {}, manualModels: [] }, { headers: { etag: '"1"' } });
+			if (url.startsWith("/api/tts/custom-endpoint") || url.startsWith("/api/custom-provider")) return Response.json({ baseUrl: "", models: [] }, { headers: { etag: '"t"' } });
 			if (init?.method === "PUT") {
 				const section = url.replace("/api/settings/", "");
 				const body = JSON.parse(String(init.body)); puts.push([section, body]);
@@ -257,23 +265,65 @@ describe("Settings integration", () => {
 		const { notifySettingsSaved } = await import("../components/settings-signal.ts");
 		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
 		await act(async () => { notifySettingsSaved("dictation"); }); // a fresh language store read
-		assert.equal(q(host, "dictation-endpoint"), null, "Deepgram: no OpenAI endpoint");
+		assert.deepEqual(Array.from((q(host, "dictation-provider") as HTMLSelectElement).options).map((o) => o.value), ["deepgram", "openai", "custom"]);
 		assert.ok(q(host, "dictation-setup-hint"));
 		assert.ok(q(host, "key-deepgram_api_key"));
 		assert.equal(q(host, "dictation-openai-key"), null);
-		const selector = q(host, "dictation-provider") as HTMLSelectElement;
-		await act(async () => { Object.defineProperty(selector, "value", { configurable: true, value: "openai" }); selector.dispatchEvent(new window.Event("change", { bubbles: true })); });
-		assert.ok(q(host, "dictation-endpoint"));
+		assert.equal(q(host, "dictation-custom-model"), null);
+		assert.match(q(host, "stt-custom-endpoint-status")!.textContent ?? "", /http:\/\/local\.test\/v1 · 2 models · keyless/);
+		const change = async (value: string) => {
+			const select = q(host, "dictation-provider") as HTMLSelectElement;
+			await act(async () => { Object.defineProperty(select, "value", { configurable: true, value }); select.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		};
+		await change("openai");
 		assert.equal(q(host, "dictation-setup-hint"), null, "the Deepgram setup hint gives way");
 		assert.equal(q(host, "key-deepgram_api_key"), null, "OpenAI's key row replaces Deepgram's");
 		assert.match(q(host, "dictation-openai-key-status")!.textContent ?? "", /not set/);
-		assert.equal(q(host, "dictation-endpoint-openai"), null, "no second OpenAI key line under the endpoint");
 		await click(q(host, "dictation-openai-key"));
 		assert.ok(q(host, "key-openai-editor"), "opens the OpenAI paste field in Model API keys");
-		const box = q(host, "dictation-endpoint-custom") as HTMLInputElement;
-		await act(async () => { box.checked = true; box.click(); });
-		assert.deepEqual(puts.at(-1), ["dictation", { language: "pl", baseUrl: "http://old.test/v1", customEndpoint: true }]);
-		assert.ok(q(host, "dictation-openai-key"), "the OpenAI row stays put with a custom endpoint (no layout shift)");
+
+		await change("custom");
+		assert.deepEqual(puts.at(-1), ["general", { dictationProvider: "custom" }]);
+		assert.equal(q(host, "dictation-openai-key"), null);
+		assert.match(q(host, "dictation-custom-model-row")!.textContent ?? "", /Required/);
+		await click(q(host, "dictation-custom-model"));
+		await click(q(document, "dictation-custom-model-option-whisper-large")!);
+		assert.deepEqual(puts.at(-1), ["dictation", { language: "pl", customModel: "whisper-large" }], "the language rides along");
+		assert.match(q(host, "dictation-custom-model")!.textContent ?? "", /whisper-large/);
+	});
+
+	it("Providers → TTS: OpenAI by default; a custom endpoint joins once added", async () => {
+		bridge();
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, voice: "nova" } };
+		const puts: [string, unknown][] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [{ id: "OPENAI_API_KEY", info: null, present: true, masked: "…abcd (51 chars)", source: "file", shadowedByEnv: false }], providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }] });
+			if (url.startsWith("/api/tts/custom-endpoint")) return Response.json({ baseUrl: "http://speech.test/v1", authMode: "apiKey", keySource: "file", keyPresent: true, keyReuseRequired: false, models: [{ id: "kokoro" }], overrides: {}, manualModels: [] }, { headers: { etag: '"1"' } });
+			if (url.startsWith("/api/stt/custom-endpoint") || url.startsWith("/api/custom-provider")) return Response.json({ baseUrl: "", models: [] }, { headers: { etag: '"s"' } });
+			if (init?.method === "PUT") {
+				const section = url.replace("/api/settings/", "");
+				const body = JSON.parse(String(init.body)); puts.push([section, body]);
+				record = { ...record, [section]: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
+		const group = q(host, "group-tts")!;
+		assert.ok(group.contains(q(host, "tts-provider")));
+		assert.match(q(host, "tts-openai-key-status")!.textContent ?? "", /set in Model API keys/);
+		assert.match(q(host, "tts-custom-endpoint-status")!.textContent ?? "", /http:\/\/speech\.test\/v1 · 1 model · API key/);
+		assert.equal(q(host, "tts-add-provider"), null, "one endpoint per feature");
+		const select = q(host, "tts-provider") as HTMLSelectElement;
+		assert.deepEqual(Array.from(select.options).map((o) => o.value), ["openai", "custom"]);
+		await act(async () => { Object.defineProperty(select, "value", { configurable: true, value: "custom" }); select.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		assert.deepEqual(puts.at(-1), ["speech", { enabled: true, voice: "nova", provider: "custom" }], "the section's other fields ride along");
+		await click(q(host, "tts-custom-endpoint-row-btn"));
+		assert.match(q(host, "tts-custom-path-note")!.textContent ?? "", /Calls POST http:\/\/speech\.test\/v1\/audio\/speech/);
+		await click(q(host, "tts-custom-model"));
+		await click(q(document, "tts-custom-model-option-kokoro")!);
+		assert.deepEqual(puts.at(-1), ["speech", { enabled: true, voice: "nova", provider: "custom", customModel: "kokoro" }]);
 	});
 
 	it("the shell's navigation request opens General, but opening alone never checks", async () => {

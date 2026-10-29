@@ -9,9 +9,11 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-speech-http-"));
 process.env.LH_DATA_DIR = dir;
 process.env.LH_AUTH_FILE = path.join(dir, "auth.json");
-delete process.env.TTS_API_KEY;
+delete process.env.CUSTOM_TTS_API_KEY;
 const { writeSettings } = await import("../src/store/settings.ts");
 const { POST } = await import("../app/api/tts/openai/route.ts");
+const { TTS_ENDPOINT } = await import("../src/core/custom-provider-auth.ts");
+const { authorizeFixture } = await import("./helpers/custom-provider-auth.ts");
 
 describe("TTS through a strict OpenAI-compatible HTTP provider", () => {
 	const audio = new Uint8Array([0xff, 0xf3, 1, 2, 3, 4]);
@@ -60,10 +62,16 @@ describe("TTS through a strict OpenAI-compatible HTTP provider", () => {
 		expectedKey = undefined;
 		slow = false;
 		closed = new Promise((resolve) => { markClosed = resolve; });
-		writeSettings({ version: 1, speech: { enabled: true, customEndpoint: true, baseUrl } });
+		connect();
 	});
+	/** Connect the TTS custom endpoint (bound like a real Connect) and pick it. */
+	function connect(key?: string) {
+		fs.rmSync(process.env.LH_AUTH_FILE!, { force: true });
+		const cp = authorizeFixture({ baseUrl, authMode: key ? "apiKey" : "keyless", models: [{ id: "gpt-4o-mini-tts" }] }, key, TTS_ENDPOINT);
+		writeSettings({ version: 1, speech: { enabled: true, provider: "custom", customModel: "gpt-4o-mini-tts" }, customTtsProvider: cp });
+	}
 	afterEach(() => {
-		delete process.env.TTS_API_KEY;
+		delete process.env.CUSTOM_TTS_API_KEY;
 		delete process.env.OPENAI_API_KEY;
 		delete process.env.DEEPGRAM_API_KEY;
 		server.closeAllConnections();
@@ -78,8 +86,8 @@ describe("TTS through a strict OpenAI-compatible HTTP provider", () => {
 			body: JSON.stringify({ parts: [{ text }] }), signal,
 		}));
 	}
-	it("uses only the standard audio route and an independently configured TTS key", async () => {
-		expectedKey = process.env.TTS_API_KEY = "tts-throwaway-test-key";
+	it("uses only the standard audio route and the endpoint's own bound key", async () => {
+		connect(expectedKey = "tts-throwaway-test-key");
 		process.env.OPENAI_API_KEY = "different-openai-test-key";
 		process.env.DEEPGRAM_API_KEY = "different-deepgram-test-key";
 		const response = await post();

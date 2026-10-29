@@ -25,7 +25,7 @@ it("uploads a complete multipart WAV to an independent keyless compatible endpoi
 	try {
 		const { port } = server.address() as { port: number };
 		const response = await transcribeOpenAIDictation(new Request("http://app/api/stt/openai", { method: "POST", headers: { "content-type": "audio/wav" }, body: pcm16Wav([new Uint8Array([1, 2, 3, 4])]) }), {
-			enabled: true, apiKey: undefined, custom: true, keyId: "STT_API_KEY", language: "en-GB", baseUrl: `http://127.0.0.1:${port}/gateway/v1`, model: "independent-local-model",
+			enabled: true, apiKey: undefined, custom: true, language: "en-GB", baseUrl: `http://127.0.0.1:${port}/gateway/v1`, model: "independent-local-model",
 		});
 		assert.equal(response.status, 200);
 		assert.deepEqual(await response.json(), { text: "Compatible transcription" });
@@ -48,7 +48,7 @@ it("uses only the separate bearer key and redacts errors from a real compatible 
 	try {
 		const { port } = server.address() as { port: number };
 		const response = await transcribeOpenAIDictation(new Request("http://app/api/stt/openai", { method: "POST", headers: { "content-type": "audio/wav" }, body: pcm16Wav([new Uint8Array([0, 1])]) }), {
-			enabled: true, apiKey: "test-stt-only-credential", custom: true, keyId: "STT_API_KEY", language: "multi", model: "m", baseUrl: `http://127.0.0.1:${port}/v1`,
+			enabled: true, apiKey: "test-stt-only-credential", custom: true, language: "multi", model: "m", baseUrl: `http://127.0.0.1:${port}/v1`,
 		});
 		assert.equal(response.status, 502);
 		assert.deepEqual(await response.json(), { message: "Transcription server answered 401." });
@@ -70,7 +70,7 @@ it("cancelling a recording upload closes its real provider request", async () =>
 		const { port } = server.address() as { port: number };
 		const controller = new AbortController();
 		const pending = transcribeOpenAIDictation(new Request("http://app/api/stt/openai", { method: "POST", headers: { "content-type": "audio/wav" }, body: pcm16Wav([new Uint8Array([0, 1])]), signal: controller.signal }), {
-			enabled: true, apiKey: undefined, custom: true, keyId: "STT_API_KEY", language: "multi", model: "m", baseUrl: `http://127.0.0.1:${port}/v1`,
+			enabled: true, apiKey: undefined, custom: true, language: "multi", model: "m", baseUrl: `http://127.0.0.1:${port}/v1`,
 		});
 		await arrived; controller.abort();
 		assert.equal((await pending).status, 502);

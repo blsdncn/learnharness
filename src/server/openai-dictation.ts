@@ -1,12 +1,24 @@
 import { DICTATION_SAMPLE_RATE, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, openAIDictationLanguage, type DictationLanguage } from "../core/dictation.ts";
-import { normalizeSpeechBaseUrl } from "../core/settings.ts";
-import type { AudioConnection } from "../core/audio-connection.ts";
+import { normalizeBaseUrl } from "../core/settings.ts";
+import { OPENAI_AUDIO_KEY_ID, type AudioConnection } from "../core/audio-connection.ts";
+import { STT_ENDPOINT } from "../core/custom-provider-auth.ts";
+import { readSettings } from "../store/settings.ts";
+import { customEndpointCredential } from "./custom-provider-auth.ts";
+import { keyValue } from "./keys.ts";
 
 interface DictationDeps extends AudioConnection {
 	language: DictationLanguage;
-	apiKey: string | undefined;
+	apiKey?: string;
 	enabled: boolean;
 	fetchFn?: typeof fetch;
+}
+
+/** The key one upload may send: OpenAI's from Providers, or the custom
+ *  endpoint's bound credential (undefined apiKey = keyless). */
+export function dictationCredential(custom: boolean): { authorized: boolean; apiKey?: string } {
+	if (!custom) return { authorized: true, apiKey: keyValue(OPENAI_AUDIO_KEY_ID) };
+	const credential = customEndpointCredential(STT_ENDPOINT, readSettings()?.customSttProvider);
+	return credential.ok ? { authorized: true, apiKey: credential.apiKey } : { authorized: false };
 }
 
 const response = (message: string, status: number) => Response.json({ message }, { status, headers: { "Cache-Control": "no-store" } });
@@ -48,12 +60,16 @@ function validWav(bytes: Uint8Array): boolean {
 		ascii(36, "data") && view.getUint32(40, true) === length;
 }
 
-/** One explicitly selected Platform API transcription. Never exposes a key or raw upstream error. */
-export async function transcribeOpenAIDictation(request: Request, deps: DictationDeps): Promise<Response> {
-	if (!deps.enabled) return response("Select OpenAI in Settings → Providers → Dictation first.", 403);
-	if (!deps.baseUrl) return response("No server URL — set one in Settings → Providers → Dictation → Advanced.", 503);
-	const baseUrl = normalizeSpeechBaseUrl(deps.baseUrl);
+/** One explicitly selected OpenAI-shape transcription (OpenAI or the custom
+ *  endpoint). Never exposes a key or raw upstream error. `authorized` false:
+ *  the custom endpoint's credential isn't bound to its URL. */
+export async function transcribeOpenAIDictation(request: Request, deps: DictationDeps & { authorized?: boolean }): Promise<Response> {
+	if (!deps.enabled) return response("Select OpenAI or Custom endpoint in Settings → Providers → Dictation first.", 403);
+	if (!deps.baseUrl) return response("No custom dictation endpoint — add one in Settings → Providers → Dictation.", 503);
+	if (!deps.model) return response("No dictation model — pick one in Settings → Providers → Dictation.", 503);
+	const baseUrl = normalizeBaseUrl(deps.baseUrl);
 	if (!baseUrl) return response("Invalid dictation server URL.", 400);
+	if (deps.custom && deps.authorized === false) return response("The custom dictation endpoint isn't authorized — reconnect it in Settings → Providers → Dictation.", 503);
 	if (!deps.custom && !deps.apiKey) return response("No OpenAI API key — add one in Settings → Providers.", 503);
 	if (!request.headers.get("content-type")?.toLowerCase().startsWith("audio/wav")) return response("Expected WAV audio.", 415);
 	let bytes: Uint8Array | null;

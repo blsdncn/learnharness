@@ -10,9 +10,9 @@ import { notifySettingsSaved } from "../components/settings-signal.ts";
 it("records, flushes and retries OpenAI audio without losing or double-inserting it", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	const previous = new Map<string, PropertyDescriptor | undefined>();
-	let provider: "openai" | "deepgram" = "openai";
+	let provider: "openai" | "deepgram" | "custom" = "openai";
 	let hasKey = true;
-	let connection: { customEndpoint?: boolean; baseUrl?: string; model?: string } = {};
+	let custom: { dictation?: object; customSttProvider?: object } = {};
 	let micCalls = 0;
 	let uploads = 0;
 	let mode: "defer" | "fail" | "success" = "defer";
@@ -75,7 +75,7 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 			return { getTracks: () => [{ stop() {} }] };
 		} } },
 		fetch: async (url: string, init?: RequestInit) => {
-			if (url === "/api/settings") return Response.json({ settings: { general: { dictationProvider: provider }, dictation: connection } });
+			if (url === "/api/settings") return Response.json({ settings: { general: { dictationProvider: provider }, dictation: custom.dictation ?? {}, ...(custom.customSttProvider ? { customSttProvider: custom.customSttProvider } : {}) } });
 			if (url === "/api/keys") return Response.json({ keys: hasKey ? [{ id: "OPENAI_API_KEY", present: true }] : [] });
 			if (url === "/api/stt/token") return Response.json({ token: "fake-deepgram-token" });
 			assert.equal(url, "/api/stt/openai");
@@ -137,7 +137,8 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		assert.equal(current!.error, OPENAI_DICTATION_KEYLESS);
 		assert.equal(micCalls, beforeMic, "missing key is detected before capturing audio");
 
-		connection = { customEndpoint: true, baseUrl: "http://keyless.test/v1", model: "local-model" };
+		provider = "custom";
+		custom = { dictation: { customModel: "local-model" }, customSttProvider: { baseUrl: "http://keyless.test/v1", authMode: "keyless", models: [{ id: "local-model" }] } };
 		// Saves announce themselves; dictation reads the settled preference.
 		await act(async () => { notifySettingsSaved("dictation"); });
 		mode = "success";

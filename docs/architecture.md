@@ -23,22 +23,33 @@ converts TeX to English with KaTeX and speech-rule-engine, and calls
 `/audio/speech`. `POST /api/tts/openai` streams MP3 audio to the client;
 `GET /api/tts/openai` reports activation and key presence without exposing
 credentials or probing the provider. Settings → TTS controls listening and
-the voice. No voice discovery is required.
+the voice, and names the provider with a link to Providers. No voice
+discovery is required.
 
-Where TTS and OpenAI dictation requests go is one rule
+Where TTS and OpenAI-shape dictation requests go is one rule
 (`src/core/audio-connection.ts`, resolved into `speech` / `dictation` by
-`resolveSettings`): by default OpenAI at a fixed model (`gpt-4o-mini-tts`,
-`gpt-transcribe`) with `OPENAI_API_KEY` from Providers. Each section's
-`customEndpoint` flag switches to its saved `baseUrl` and `model`, with that
-section's own key (`TTS_API_KEY` / `STT_API_KEY`, entered inline in
-`components/settings/audio-endpoint.tsx` and not listed in Providers); an
-empty key sends no Authorization header. The OpenAI key never goes to a
-custom server, and a custom endpoint without a server refuses with 503
-rather than falling back to OpenAI. The custom fields are kept while the
-flag is off. Dictation settings live in Providers → Dictation: the provider
-(Deepgram | OpenAI, `general.dictationProvider`), the Deepgram key, the
-language (shared: OpenAI receives its ISO-639-1 part, Multilingual sends
-none), and OpenAI's endpoint. Provider requests originate on the app
+`resolveSettings`): OpenAI at a fixed model (`gpt-4o-mini-tts`,
+`gpt-transcribe`) with `OPENAI_API_KEY` from Providers, or the feature's
+own custom endpoint and the model picked from its list. TTS and dictation
+each have one custom endpoint, connected exactly like the chat custom
+endpoint (`docs/custom-providers.md`) at `/api/tts/custom-endpoint` and
+`/api/stt/custom-endpoint`: a top-level settings entry
+(`customTtsProvider` / `customSttProvider`, never a PUT section, so a stale
+section save can't wipe a Connect), its own key (`CUSTOM_TTS_API_KEY` /
+`CUSTOM_STT_API_KEY`) bound to its URL, Keyless or API key, and a
+`/models` probe with typed IDs as a fallback. `server/custom-provider-http.ts`
+serves all three from one handler per endpoint kind
+(`core/custom-provider-auth.ts`); only chat stores per-model pins and
+publishes a pi-ai provider. A request uses the endpoint's key only while
+its binding matches the URL; the OpenAI key never goes to a custom server,
+and Custom without a connected endpoint, a picked model, or a valid
+binding refuses with 503 rather than falling back to OpenAI. Providers →
+TTS and Providers → Dictation hold the provider choice
+(`speech.provider`; `general.dictationProvider`: Deepgram | OpenAI |
+Custom), the chosen provider's key row, the endpoint row (or "+ Add a
+provider"), the model (`speech.customModel` / `dictation.customModel`),
+and for dictation the language (shared: uploads receive its ISO-639-1
+part, Multilingual sends none). Provider requests originate on the app
 server, so a remote phone can use a speech service on that server's
 loopback address.
 
@@ -80,8 +91,9 @@ authentication, keyless requests, splitting, and cancellation without a
 fetch stub. `node --import tsx scripts/smoke-tts.mjs` is an opt-in live
 synthesis check using isolated temporary settings: OpenAI with
 `OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE`) by default; `TTS_BASE_URL`
-(with optional `TTS_MODEL`) turns on the custom endpoint, authenticated by
-the optional `TTS_API_KEY` or `TTS_API_KEY_FILE`. `TTS_VOICE` sets the voice.
+(with the required `TTS_MODEL`) connects the custom endpoint through its
+real Connect route, authenticated by the optional `CUSTOM_TTS_API_KEY` or
+`CUSTOM_TTS_API_KEY_FILE`. `TTS_VOICE` sets the voice.
 `scripts/smoke-stt.mjs` is the dictation twin (`STT_*`), posting a WAV
 through `/api/stt/openai`. The probe keeps audio
 in memory and never edits the user's settings or credential store.

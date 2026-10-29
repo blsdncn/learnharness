@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import {
 	FACTORY_SETTINGS, isDictationLanguage, sanitizeUserSettings,
-	type DictationLanguage, type DictationProvider, type DictationSettings, type UserSettings,
+	type CustomProviderSettings, type DictationLanguage, type DictationProvider, type DictationSettings, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
@@ -23,6 +23,8 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	let section: DictationSettings = {};
 	/** The selected provider (General), read with the language. */
 	let provider: DictationProvider = FACTORY_SETTINGS.general.dictationProvider;
+	/** The custom endpoint (top-level customSttProvider), read with them. */
+	let endpoint: CustomProviderSettings | undefined;
 	const listeners = new Set<() => void>();
 	const publish = (patch: Partial<typeof INITIAL>) => {
 		snapshot = { ...snapshot, ...patch };
@@ -46,6 +48,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				if (version !== revision) return getLanguage();
 				section = record?.dictation ?? {};
 				provider = record?.general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider;
+				endpoint = record?.customSttProvider;
 				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
 				needsRead = false;
 				publish({ language, error: null });
@@ -104,9 +107,9 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	/** Everything a capture run needs, settled the same way as the language. */
-	async function getSetup(): Promise<{ language: DictationLanguage; provider: DictationProvider; section: DictationSettings }> {
+	async function getSetup(): Promise<{ language: DictationLanguage; provider: DictationProvider; section: DictationSettings; endpoint: CustomProviderSettings | undefined }> {
 		const language = await getLanguage();
-		return { language, provider, section };
+		return { language, provider, section, endpoint };
 	}
 
 	return {
@@ -131,8 +134,8 @@ function subscribe(listener: () => void) {
 	const off = store.subscribe(listener);
 	if (readers++ === 0) {
 		stopSignals = onSettingsSaved((section) => {
-			// General carries the provider.
-			if ((section === "dictation" && !announcingSave) || section === "general") void store.load(true).catch(() => {});
+			// General carries the provider; a custom endpoint connect signals keys.
+			if ((section === "dictation" && !announcingSave) || section === "general" || section === "keys") void store.load(true).catch(() => {});
 		});
 		// A confirmed preference lives for the window, not the page. Navigation
 		// and reopening Settings must not add a new network failure point.
