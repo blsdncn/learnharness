@@ -15,7 +15,13 @@ import { SettingsDialogBody, SettingsDialogProvider } from "../components/settin
 import nextConfig from "../next.config.ts";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
+Object.assign(globalThis, {
+	window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent,
+	HTMLInputElement: dom.window.HTMLInputElement,
+	// The model menus' MenuShell positions itself on the next frame.
+	requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+	cancelAnimationFrame: clearTimeout,
+});
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 const state = (over: Partial<UpdateState> = {}): UpdateState => ({ status: "idle", version: null, revision: 0, ...over });
@@ -208,6 +214,87 @@ describe("Settings integration", () => {
 		await click(q(host, "toggle-auto-update"));
 		assert.deepEqual(puts, [{ autoUpdate: false, futureSibling: "keep" }]);
 		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
+	});
+
+
+	it("Providers → TTS: OpenAI by default; a custom endpoint joins once added", async () => {
+		bridge();
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, voice: "nova" } };
+		const puts: [string, unknown][] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [{ id: "OPENAI_API_KEY", info: null, present: true, masked: "…abcd (51 chars)", source: "file", shadowedByEnv: false }], providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }] });
+			if (url.startsWith("/api/tts/custom-endpoint")) return Response.json({ baseUrl: "http://speech.test/v1", authMode: "apiKey", keySource: "file", keyPresent: true, keyReuseRequired: false, models: [{ id: "kokoro" }], overrides: {}, manualModels: [] }, { headers: { etag: '"1"' } });
+			if (url.startsWith("/api/custom-provider")) return Response.json({ baseUrl: "", models: [] }, { headers: { etag: '"s"' } });
+			if (init?.method === "PUT") {
+				const section = url.replace("/api/settings/", "");
+				const body = JSON.parse(String(init.body)); puts.push([section, body]);
+				record = { ...record, [section]: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
+		const group = q(host, "group-tts")!;
+		assert.ok(group.contains(q(host, "tts-provider")));
+		assert.match(q(host, "tts-openai-key-status")!.textContent ?? "", /set in Model API keys/);
+		assert.match(q(host, "tts-custom-endpoint-status")!.textContent ?? "", /http:\/\/speech\.test\/v1 · 1 model · API key/);
+		assert.equal(q(host, "tts-add-provider"), null, "one endpoint per feature");
+		const select = q(host, "tts-provider") as HTMLSelectElement;
+		assert.deepEqual(Array.from(select.options).map((o) => o.value), ["openai", "custom"]);
+		await act(async () => { Object.defineProperty(select, "value", { configurable: true, value: "custom" }); select.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		assert.deepEqual(puts.at(-1), ["speech", { enabled: true, voice: "nova", provider: "custom" }], "the section's other fields ride along");
+		await click(q(host, "tts-custom-endpoint-row-btn"));
+		assert.match(q(host, "tts-custom-path-note")!.textContent ?? "", /Calls POST http:\/\/speech\.test\/v1\/audio\/speech/);
+		await click(q(host, "tts-custom-model"));
+		await click(q(document, "tts-custom-model-option-kokoro")!);
+		assert.deepEqual(puts.at(-1), ["speech", { enabled: true, voice: "nova", provider: "custom", customModel: "kokoro" }]);
+	});
+
+	it("TTS provider and listening edits survive an in-flight save and dialog reopen", async () => {
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, voice: "nova" } };
+		const first = deferred<Response>();
+		const puts: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [], providers: [] });
+			if (url === "/api/tts/openai") return Response.json({ configured: true, keyPresent: true, custom: true });
+			if (url.includes("custom")) return Response.json({ baseUrl: "http://speech.test/v1", models: [{ id: "kokoro" }] }, { headers: { etag: '"1"' } });
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body));
+				puts.push(body);
+				if (puts.length === 1) return first.promise;
+				record = { ...record, speech: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
+		try {
+			const select = q(host, "tts-provider") as HTMLSelectElement;
+			await act(async () => {
+				Object.defineProperty(select, "value", { configurable: true, value: "custom" });
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			await click(q(host, "settings-nav-speech"));
+			await click(q(host, "toggle-read-the-question"));
+			assert.equal(puts.length, 1, "the listening edit waits for the provider save");
+			const mounted = roots.find((entry) => entry.host === host)!;
+			await act(async () => mounted.root.unmount());
+			roots.splice(roots.indexOf(mounted), 1);
+			host.remove();
+			record = { ...record, speech: puts[0] };
+			await act(async () => first.resolve(Response.json({ settings: record })));
+			const reopened = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+			assert.deepEqual(puts, [
+				{ enabled: true, voice: "nova", provider: "custom" },
+				{ enabled: true, voice: "nova", provider: "custom", readQuestion: true },
+			]);
+			assert.equal(q(reopened, "toggle-read-the-question")!.getAttribute("aria-checked"), "true");
+			assert.match(q(reopened, "speech-provider")!.textContent ?? "", /Custom endpoint/);
+		} finally {
+			first.resolve(Response.json({ settings: record }));
+		}
 	});
 
 	it("the shell's navigation request opens General, but opening alone never checks", async () => {

@@ -195,9 +195,13 @@ describe("practice display surfaces", () => {
 	});
 
 	it("does not change the collapsed preview, dismissal or global prose renderer", () => {
-		const preview = renderToStaticMarkup(dock({ statement: doubled }, false));
+		const collapsed = parseHTML(renderToStaticMarkup(dock({ statement: doubled }, false))).document;
+		const preview = collapsed.querySelector('[data-testid="practice-dock-bar"]')!.outerHTML;
 		assert.ok(preview.includes(doubled));
 		assert.deepEqual(math(preview).annotations, []);
+		// The hidden copy "Read the question" reads renders like the open dock.
+		const hidden = collapsed.querySelector('[data-testid="practice-dock-hidden-problem"]')!.outerHTML;
+		assert.deepEqual(math(hidden).annotations, math(renderToStaticMarkup(dock({ statement: doubled }))).annotations);
 		const dismissed = renderToStaticMarkup(<ConcludeCard part={part({ outcome: "dismissed", verdict: doubled }, { reveal: doubled })} />);
 		assert.ok(dismissed.includes("Problem dismissed."));
 		assert.deepEqual(math(dismissed).annotations, []);

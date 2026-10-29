@@ -15,6 +15,72 @@ Status: **the canonical architecture spec** — describes the as-built system, v
 
 ---
 
+## Listening (2026-10-26)
+
+`src/core/speech.ts` defines the browser-safe speech request contract and
+text splitting. `src/server/speech.ts` resolves the TTS connection,
+converts TeX to English with KaTeX and speech-rule-engine, and calls
+`/audio/speech`. `POST /api/tts/openai` streams MP3 audio to the client;
+`GET /api/tts/openai` reports activation and key presence without exposing
+credentials or probing the provider. Settings → TTS controls listening and
+the voice, and names the provider with a link to Providers. No voice
+discovery is required.
+
+`src/core/audio-connection.ts` resolves OpenAI's fixed `gpt-4o-mini-tts`
+model and `OPENAI_API_KEY`, or TTS's independent custom endpoint and selected
+model. `customTtsProvider` is a top-level settings entry, managed only through
+`/api/tts/custom-endpoint`. This route reuses chat's connect/disconnect handler,
+model discovery, and URL-bound credentials, with a separate `CUSTOM_TTS_API_KEY`.
+Only chat stores model budget pins and registers a pi-ai provider. TTS refuses
+missing configuration or unauthorized credentials instead of falling back to
+OpenAI. The OpenAI key is never sent to the custom server. Provider selection
+and custom model selection live in Providers → TTS; listening preferences live
+in Settings → TTS. All synthesis requests originate on the app server.
+
+`components/listen/speech-dom.ts` identifies reading blocks within separate
+transcript and dock roots. Plan, reasoning, code blocks, and drawings are
+excluded, as is anything inside a collapsed `<details>` (tool-card details,
+research and PDF briefs) until it is opened. KaTeX source annotations supply TeX once per equation. A table
+reads row by row: the header row as-is, every other row with each cell
+under its column header. With "Read the question" on (Settings → TTS), a
+read that started in the transcript continues into the dock's question or
+practice problem; a folded dock opens when no scroll is needed and is
+otherwise read hidden (a folded practice bar carries a hidden copy of its
+statement for this).
+`listen-controller.ts` owns one audio element and a reading queue, prefetches
+the next block, and fences late responses after stop or restart. While a
+turn is live (the chat's busy state) it reads only finished transcript
+blocks — one is finished once another follows it, or the turn ends — and
+waits instead of stopping when it catches up. "Autoplay replies" arms on
+each turn the learner starts (sends and dock answers, inside the gesture
+that unlocks the audio) and reads the reply from its first finished block
+past the learner's own rows (`data-listen-yours`), unless something is
+already reading or dictation is live. An autoplayed read passes over the
+research and PDF briefs (`data-listen-aside`) even when they're open, as
+does every read except one started inside that brief. Playback
+speed is stored in browser localStorage. `listen.tsx` supplies one shared
+speaker, the current block highlight, and a player above the dock. Mouse
+input reveals the speaker on hover; touch input reveals it on a tap.
+Answered explain cards can queue the learner's answer followed by the
+committed answer with Compare. Practice statements and revealed solutions
+use the same block markers. Listening is opt-in: `speech.enabled` turns it
+on, including for keyless servers, and unset means off. Request cancellation stops upstream
+synthesis; provider error bodies are withheld because they may echo credentials.
+The server-only speech-rule-engine package and its locale data are
+included explicitly in standalone tracing through `next.config.ts`.
+
+`tests/speech-http.test.ts` exercises the route through an independent
+strict HTTP implementation of the OpenAI speech contract. It checks
+authentication, keyless requests, splitting, and cancellation without a
+fetch stub. `node --import tsx scripts/smoke-tts.mjs` is an opt-in live
+synthesis check using isolated temporary settings: OpenAI with
+`OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE`) by default; `TTS_BASE_URL`
+(with the required `TTS_MODEL`) connects the custom endpoint through its
+real Connect route, authenticated by the optional `CUSTOM_TTS_API_KEY` or
+`CUSTOM_TTS_API_KEY_FILE`. `TTS_VOICE` sets the voice.
+The probe keeps audio in memory and uses temporary settings and credentials.
+It never edits the user's settings or credential store.
+
 ## 1. Two axes, one law
 
 Hold the architecture along two orthogonal axes:

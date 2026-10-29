@@ -24,8 +24,16 @@ import type {
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
+	SpeechSettings,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	COMPACTION_THRESHOLD_FLOOR,
+	CUSTOM_MODEL_PIN_FLOOR,
+	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MODEL_SLOTS,
+	SPEECH_ID_MAX,
+} from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -387,6 +395,45 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyResult<string | undefined> {
+	const value = raw[key];
+	if (value === undefined || value === "") return { ok: true, settings: undefined };
+	if (typeof value !== "string" || !value.trim() || value.trim().length > SPEECH_ID_MAX) {
+		return { ok: false, error: `${key} must be a non-empty id of at most ${SPEECH_ID_MAX} characters` };
+	}
+	return { ok: true, settings: value.trim() };
+}
+
+/** speech (listen wave, 2026-10-26): listening, the voice, reading into
+ *  the question, autoplay, the provider and the custom endpoint's model.
+ *  The endpoint itself connects via /api/tts/custom-endpoint, never here.
+ *  Replace-whole, like every section. */
+export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<SpeechSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: SpeechSettings = {};
+	if (raw.enabled !== undefined) {
+		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
+		settings.enabled = raw.enabled;
+	}
+	for (const key of ["readQuestion", "autoplay"] as const) {
+		if (raw[key] === undefined) continue;
+		if (typeof raw[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
+		settings[key] = raw[key];
+	}
+	const voice = parseSpeechId(raw, "voice");
+	if (!voice.ok) return voice;
+	if (voice.settings) settings.voice = voice.settings;
+	if (raw.provider !== undefined) {
+		if (raw.provider !== "openai" && raw.provider !== "custom") return { ok: false, error: 'provider must be "openai" or "custom"' };
+		settings.provider = raw.provider;
+	}
+	const model = parseSpeechId(raw, "customModel");
+	if (!model.ok) return model;
+	if (model.settings) settings.customModel = model.settings;
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -445,6 +492,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	speech: parseSpeechSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
 } as const;

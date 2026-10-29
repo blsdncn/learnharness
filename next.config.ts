@@ -93,6 +93,14 @@ const nextConfig: NextConfig = {
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// Listen wave (2026-10-26): math speech's engine reads its locale
+			// data via a runtime path (lib/mathmaps/<locale>.json) the tracer
+			// cannot see. Only the two files the English setup loads.
+			"node_modules/speech-rule-engine/lib/mathmaps/{base,en}.json",
+			// SRE's webpack bundle resolves these via dynamic extRequire,
+			// which tracing misses. Cover both hoisted and nested installs.
+			"node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
+			"node_modules/speech-rule-engine/node_modules/{@xmldom/xmldom,commander,wicked-good-xpath}/**/*",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while
 			// traversing modules; **/data/**/* still prunes gcp-metadata and
 			// its private runtime chain. Includes are applied after traversal.
@@ -113,6 +121,7 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
+		"speech-rule-engine", // resolves its locale dir from its own __dirname
 	],
 };
 

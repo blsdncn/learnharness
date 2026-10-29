@@ -84,6 +84,8 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
+import { LISTEN_ENTER_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -255,7 +257,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send: sessionSend, continueIfOwed, steer, steerQueue, submitAnswer: sessionSubmitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -373,6 +375,34 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
+	// Listening claims Esc too (listen wave): stop reading before anything
+	// underneath is dismissed or aborted.
+	const listen = useListen();
+	const listening = useListenSnapshot().status !== "idle";
+	const listeningRef = useRef(false);
+	listeningRef.current = listening;
+	const listenRef = useRef(listen);
+	listenRef.current = listen;
+	// AUTOPLAY (Settings → TTS): every turn the learner starts here — a
+	// send, an answer — arms reading its reply, inside the gesture (the
+	// audio unlock needs one). A refused send disarms.
+	const send = useCallback(
+		(input: ChatInput, onAccepted?: () => void) => {
+			listenRef.current.controller?.armAutoplay();
+			return sessionSend(input, onAccepted).then((accepted) => {
+				if (!accepted) listenRef.current.controller?.disarmAutoplay();
+				return accepted;
+			});
+		},
+		[sessionSend],
+	);
+	const submitAnswer = useCallback(
+		(...args: Parameters<typeof sessionSubmitAnswer>) => {
+			listenRef.current.controller?.armAutoplay();
+			sessionSubmitAnswer(...args);
+		},
+		[sessionSubmitAnswer],
+	);
 	useEffect(() => {
 		const onAbort = () => {
 			const target = escAbortTarget({
@@ -380,6 +410,7 @@ export function Chat({
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
+				listening: listeningRef.current,
 				pending: pendingRef.current !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
@@ -389,6 +420,7 @@ export function Chat({
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
 			else if (target === "plan") setPlanOpen(false);
+			else if (target === "listen") listenRef.current.controller?.stop();
 			// setup closes itself; null = nothing to do — both claimed.
 		};
 		window.addEventListener("lh:kbd-abort-turn", onAbort);
@@ -466,6 +498,10 @@ export function Chat({
 	const busy = localStream || turnInFlight;
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
+	// Listening's follow mode reads only finished blocks while a turn runs.
+	useEffect(() => {
+		listen.controller?.setLive(busy);
+	}, [busy, listen.controller]);
 	// The attach handoff (stream-reattach wave): the moment a resumed
 	// stream takes over the rendering — the SDK left "ready", so
 	// submitted/streaming means chunks are flowing — localStream covers
@@ -1395,7 +1431,7 @@ export function Chat({
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
 					<ConversationContent className="min-h-full gap-0 p-0">
-						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
+						<div data-session-find-root="" {...{ [LISTEN_ROOT_ATTR]: "transcript" }} className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
 									title="New session"
@@ -1497,6 +1533,7 @@ export function Chat({
 										    Rendered WITHOUT the Message wrapper — that is the bubble. */
 											<div
 										data-testid="user-message"
+										{...{ [LISTEN_YOURS_ATTR]: "" }}
 										/* THE DOCUMENT, ALL-IN (owner rounds two+three, 2026-10-07):
 										    no chat side — the user message is a full-width card-color
 										    BAND, the IDENTICAL geometry as the thinking rows: 5px band
@@ -1510,7 +1547,7 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
+												<div className="lh-prose whitespace-pre-wrap text-foreground" data-listen-block="You">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
 											</div>
@@ -1558,7 +1595,7 @@ export function Chat({
 													}
 													case "reasoning":
 														return (
-															<Reasoning key={pi} isStreaming={status === "streaming" && isLastPart} className="mb-2">
+															<Reasoning key={pi} isStreaming={status === "streaming" && isLastPart} className="mb-2" {...{ [LISTEN_SKIP_ATTR]: "" }}>
 																<ReasoningTrigger />
 																<ReasoningContent>{part.text ?? ""}</ReasoningContent>
 															</Reasoning>
@@ -1838,7 +1875,7 @@ export function Chat({
  *  then the session overlays (mermaid paints above plan — later in DOM),
  *  then setup (self-closing — the gate only must not fire), then the
  *  2026-10-02 abort chain proper (question before turn). */
-export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
+export type EscAbortTarget = "mermaid" | "plan" | "setup" | "listen" | "question" | "problem" | "turn" | null;
 	/**
  * Does the opening topic still owe its first send? The topic is the
  * server's ?prompt= or the sessionStorage stash. The gate is "no real
@@ -1858,6 +1895,10 @@ export function escAbortTarget(s: {
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
+	/** Something is being read aloud (listen wave, 2026-10-26): Esc stops
+	 *  it — below the overlays (they sit on top of everything), above the
+	 *  question/problem/turn (stopping audio must never dismiss or abort). */
+	listening: boolean;
 	pending: boolean;
 	/** An active practice problem (practice sessions, 2026-10-04): Esc
 	 *  opens the discard confirm — below a pending question (the two
@@ -1871,6 +1912,7 @@ export function escAbortTarget(s: {
 	if (s.mermaidFocus) return "mermaid";
 	if (s.planOpen) return "plan";
 	if (s.setupOpen) return "setup";
+	if (s.listening) return "listen";
 	if (s.pending) return "question";
 	if (s.problem) return "problem";
 	if (s.busy) return "turn";
@@ -2204,6 +2246,20 @@ function DockOverlay({
 	};
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
+	// READ THE QUESTION (Settings → TTS): reading crossed from the
+	// transcript into a folded dock. At the bottom, open it the way the bar
+	// does (dictation finishes first); scrolled up, it stays folded and is
+	// read hidden — never a forced scroll.
+	useEffect(() => {
+		const onEnterDock = () => {
+			if (expandedRef.current || !atBottomRef.current) return;
+			void finishDictation().then(() => {
+				expandAndRevealRef.current();
+			});
+		};
+		document.addEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
+		return () => document.removeEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
+	}, []);
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
 	// invitation or collapsed by scroll — Enter is never dead. Any live
@@ -2370,6 +2426,7 @@ function DockOverlay({
 						<div
 							ref={contentRef}
 							key={mode}
+							{...{ [LISTEN_ROOT_ATTR]: "dock" }}
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pending ? (
@@ -2432,6 +2489,15 @@ function DockOverlay({
 					    context still reaches it — DockOverlay is a Conversation
 					    child. */}
 					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
+				</div>
+				{/* The listen player (listen wave): anchored to the block's top
+				    edge like the scroll disc, at the dock column's right — and
+				    one row higher on narrow screens, where the centered disc
+				    would sit under it. */}
+				<div className="pointer-events-none absolute inset-x-0 bottom-full mb-12 sm:mb-2">
+					<div className={`${DOCK} flex justify-end`}>
+						<ListenPill />
+					</div>
 				</div>
 				{/* The plan marginalia (owner, plan-placement round): the bare
 				    diagram in the band's right flank — boundaless, meet-fitted, part

@@ -37,6 +37,7 @@ import {
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
+	type SpeechSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
@@ -50,6 +51,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { SpeechSection } from "./speech-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -60,11 +62,17 @@ const SECTIONS = [
 	{ id: "keys", label: "Providers" },
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
+	{ id: "speech", label: "TTS" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
+type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "speech";
+type PendingSectionWrite = { compose: (current: unknown) => object; optimistic: boolean };
+// A closed dialog can still have queued writes. A new dialog must wait
+// for those writes before loading a record on which new edits will build.
+const pendingSettingsWrites = new Set<Promise<void>>();
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -146,6 +154,12 @@ export function SettingsDialogBody({
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
+	// Separate confirmed server values from the visible pending edits. Writes
+	// replace whole sections, so edits for the same section must be rebased
+	// after the preceding response, not built from an older render.
+	const confirmedRecord = useRef<UserSettings | null>(null);
+	const visibleRecord = useRef<UserSettings | null>(null);
+	const sectionWrites = useRef<Partial<Record<WritableSection, PendingSectionWrite[]>>>({});
 	const [error, setError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
@@ -193,14 +207,25 @@ export function SettingsDialogBody({
 	// (no record = factory everything), not a failure — the error state is
 	// a non-200 or a network throw only.
 	useEffect(() => {
-		fetch("/api/settings")
-			.then((r) =>
-				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
-			)
-			.then((body: { settings: UserSettings | null }) =>
-				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
-			)
-			.catch(() => setRecord(null));
+		let live = true;
+		const load = async () => {
+			try {
+				while (pendingSettingsWrites.size) await Promise.all(pendingSettingsWrites);
+				if (!live) return;
+				const response = await fetch("/api/settings");
+				if (!response.ok) throw new Error(`status ${response.status}`);
+				const body = await response.json() as { settings: UserSettings | null };
+				if (!live) return;
+				const loaded = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
+				confirmedRecord.current = loaded;
+				visibleRecord.current = loaded;
+				setRecord(loaded);
+			} catch {
+				if (live) setRecord(null);
+			}
+		};
+		void load();
+		return () => { live = false; };
 	}, []);
 
 	// Escape closes — the layered-dismiss convention (Esc is dead for the
@@ -221,42 +246,70 @@ export function SettingsDialogBody({
 		return () => document.removeEventListener("keydown", onKey);
 	}, [onClose]);
 
-	/** ONE writer for the whole dialog: PUT the whole section, keep the
-	 *  record mirror in sync, surface route errors inline (a 400 is a
-	 *  schema mistake caught by the validation surface). */
+	/** PUTs replace whole sections. Serialize each section independently
+	 *  and apply functional edits to the last confirmed server value. */
 	const write = useCallback(
-		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
-			body: object,
+		<S extends WritableSection,>(
+			section: S,
+			change: object | ((current: UserSettings[S]) => object),
 		) => {
 			setError(null);
-			const res = await fetch(`/api/settings/${section}`, {
-				method: "PUT",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(body),
+			const queue: PendingSectionWrite[] = sectionWrites.current[section] ?? (sectionWrites.current[section] = []);
+			const idle = queue.length === 0;
+			queue.push({
+				compose: typeof change === "function" ? (current) => change(current as UserSettings[S]) : () => change,
+				optimistic: typeof change === "function",
 			});
-			if (!res.ok) {
-				const detail = (await res.json().catch(() => ({}))) as {
-					error?: string;
-				};
-				setError(`${section}: ${detail.error ?? res.status}`);
-				return;
-			}
-			// Server truth, never the request body (fix wave, owner repro):
-			// the models section clamps pinned thinking levels on write
-			// (bd68486) — a swap that rides an unsupported level lands
-			// CLAMPED in the record, and the writing surface must show the
-			// stored value in this same interaction, not the optimistic one.
-			const stored = (
-				(await res.json().catch(() => null)) as { settings?: UserSettings } | null
-			)?.settings;
-			setRecord(
-				(prev) =>
-					stored ?? ({ ...(prev ?? {}), [section]: body }) as UserSettings,
+
+			const refreshVisibleSection = () => {
+				if (!confirmedRecord.current || !visibleRecord.current) return;
+				let value: unknown = confirmedRecord.current[section];
+				// Functional edits stay interactive while awaiting the server.
+				// Existing whole-section callers continue to show server truth.
+				if (queue.some((pending) => pending.optimistic)) {
+					for (const pending of queue) value = pending.compose(value);
+				}
+				const next = { ...visibleRecord.current, [section]: value } as UserSettings;
+				visibleRecord.current = next;
+				setRecord(next);
+			};
+			refreshVisibleSection();
+			if (!idle) return;
+
+			const drain = async () => {
+				while (queue.length) {
+					const body = queue[0]!.compose(confirmedRecord.current?.[section]);
+					try {
+						const res = await fetch(`/api/settings/${section}`, {
+							method: "PUT",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify(body),
+						});
+						if (!res.ok) {
+							const detail = (await res.json().catch(() => ({}))) as { error?: string };
+							setError(`${section}: ${detail.error ?? res.status}`);
+						} else {
+							const stored = ((await res.json().catch(() => null)) as { settings?: UserSettings } | null)?.settings;
+							// Only this section belongs to this response: other sections
+							// may have newer writes or pending edits of their own.
+							const saved = stored && section in stored ? stored[section] : body;
+							confirmedRecord.current = { ...confirmedRecord.current, [section]: saved } as UserSettings;
+							notifySettingsSaved(section);
+							if (section === "appearance") onAppearanceChange(body as AppearanceSettings);
+						}
+					} catch {
+						setError(`${section}: could not save`);
+					}
+					queue.shift();
+					refreshVisibleSection();
+				}
+			};
+			const activeWrite = drain();
+			pendingSettingsWrites.add(activeWrite);
+			void activeWrite.then(
+				() => { pendingSettingsWrites.delete(activeWrite); },
+				() => { pendingSettingsWrites.delete(activeWrite); },
 			);
-			notifySettingsSaved(section);
-			if (section === "appearance")
-				onAppearanceChange(body as AppearanceSettings);
 		},
 		[onAppearanceChange],
 	);
@@ -363,14 +416,24 @@ export function SettingsDialogBody({
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
-											void write("general", { ...record.general, autoUpdate: on })
+											void write("general", (current) => ({ ...current, autoUpdate: on }))
 										}
 									/>
 								</SettingsSection>
 							)}
 							{active === "keys" && (
 								<SettingsSection title="Providers" testid="section-keys">
-									<KeysSection initialRow={initialRow ?? undefined} />
+									<KeysSection
+										initialRow={initialRow ?? undefined}
+										audio={{
+											tts: {
+												provider: record.speech?.provider ?? "openai",
+												onProvider: (provider) => void write("speech", (current) => ({ ...current, provider })),
+												customModel: record.speech?.customModel,
+												onCustomModel: (customModel) => void write("speech", (current) => ({ ...current, customModel })),
+											},
+										}}
+									/>
 								</SettingsSection>
 							)}
 							{active === "agent" && (
@@ -405,6 +468,15 @@ export function SettingsDialogBody({
 										onSectionChange={(next: AppearanceSettings) =>
 											void write("appearance", next)
 										}
+									/>
+								</SettingsSection>
+							)}
+							{active === "speech" && (
+								<SettingsSection title="TTS" testid="section-speech">
+									<SpeechSection
+										speech={record.speech}
+										onSectionChange={(next: SpeechSettings) => void write("speech", next)}
+										onOpenProviders={() => setActive("keys")}
 									/>
 								</SettingsSection>
 							)}

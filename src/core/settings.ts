@@ -456,6 +456,28 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/**
+ * Text-to-speech through `POST {baseUrl}/audio/speech`: OpenAI by default,
+ * or the TTS custom endpoint (top-level customTtsProvider — connected
+ * through its own route, never this section; see core/audio-connection.ts).
+ * Secrets stay in the key store; these settings contain only non-secret
+ * preferences.
+ */
+export interface SpeechSettings {
+	/** Unset = OpenAI. */
+	provider?: "openai" | "custom";
+	/** The custom endpoint's model, picked from its list. */
+	customModel?: string;
+	/** Listening is opt-in: unset = off. */
+	enabled?: boolean;
+	voice?: string;
+	/** Read from here continues from the transcript into the dock's open
+	 *  question or practice problem. Unset = off. */
+	readQuestion?: boolean;
+	/** Read the reply to a turn you start as it arrives. Unset = off. */
+	autoplay?: boolean;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -469,9 +491,13 @@ export interface UserSettings {
 	models?: ModelsSettings;
 	/** The custom OpenAI-compatible endpoint (non-secret config only). */
 	customProvider?: CustomProviderSettings;
+	/** The TTS custom endpoint: the same non-secret config
+	 *  shape, connected through its own route (never a PUT section). */
+	customTtsProvider?: CustomProviderSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	speech?: SpeechSettings;
 	[key: string]: unknown;
 }
 
@@ -498,6 +524,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	speech: { voice: string };
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -514,6 +541,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	speech: { voice: "alloy" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -781,6 +809,31 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** Model and voice ids: trimmed, non-empty, bounded (ids, not prose). */
+export const SPEECH_ID_MAX = 200;
+
+function sanitizeSpeechId(raw: unknown): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	const value = raw.trim();
+	return value.length > 0 && value.length <= SPEECH_ID_MAX ? value : undefined;
+}
+
+function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
+	const out: SpeechSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	const voice = sanitizeSpeechId(raw.voice);
+	if (voice) out.voice = voice;
+	const readQuestion = boolOrDrop(raw.readQuestion);
+	if (readQuestion !== undefined) out.readQuestion = readQuestion;
+	const autoplay = boolOrDrop(raw.autoplay);
+	if (autoplay !== undefined) out.autoplay = autoplay;
+	if (raw.provider === "openai" || raw.provider === "custom") out.provider = raw.provider;
+	const customModel = sanitizeSpeechId(raw.customModel);
+	if (customModel) out.customModel = customModel;
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -822,11 +875,18 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
 		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
 	}
+	for (const key of ["customTtsProvider"] as const) {
+		const value = r[key];
+		if (value !== null && typeof value === "object" && !Array.isArray(value)) out[key] = sanitizeCustomProvider(value as Record<string, unknown>);
+	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.speech !== null && typeof r.speech === "object" && !Array.isArray(r.speech)) {
+		out.speech = sanitizeSpeech(r.speech as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

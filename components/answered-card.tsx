@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
+import { useListen } from "@/components/listen/listen";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
@@ -9,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
 import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -23,6 +25,10 @@ import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const answer = answerForPresentation(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
+	// Compare (listen wave, 2026-10-26): hear your answer, then the committed one.
+	const listen = useListen();
+	const yourAnswerRef = useRef<HTMLDivElement>(null);
+	const committedRef = useRef<HTMLDivElement>(null);
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
@@ -53,15 +59,16 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 		    ThinkingBlock, instead of an inset inside the answer. Same muted
 		    rail as before; the label is now plain "Your thinking". */}
 		{answer.readingThinking && (
-			<ThinkingBlock testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking} defaultOpen />
+			<ThinkingBlock testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking} defaultOpen listenLabel="Your thinking" />
 		)}
 		{/* [&>*:last-child]:mb-0 (owner round, 2026-10-07): on ask cards the
 		    thinking row is the last child — its my-3 stacked with the card's
 		    p-4 into a 28px void below (12px above); the card's own padding is
 		    the bottom rhythm when a row ends the card. */}
 		<div
-			className="rounded-xl border bg-card p-4 text-card-foreground [&>*:last-child]:mb-0"
+			className="group/card rounded-xl border bg-card p-4 text-card-foreground [&>*:last-child]:mb-0"
 			data-testid="answered-card"
+			{...{ [LISTEN_YOURS_ATTR]: "" }}
 		>
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{/* The tool's OWN name first (owner 2026-10-09): probe-phase
@@ -86,20 +93,35 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					) : (
 						<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">incorrect</span>
 					))}
+				{isExplain && answer.text && answer.committed && listen.configured && (
+					// Hover-revealed like every listen affordance; always shown
+					// where there is no hover (touch).
+					<button
+						type="button"
+						data-testid="listen-compare"
+						onClick={() => {
+							const blocks = [yourAnswerRef.current, committedRef.current].filter((b) => b !== null);
+							listen.controller?.playList(blocks);
+						}}
+						className="ml-auto rounded-full border px-2 py-0.5 normal-case tracking-normal opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/card:opacity-100 [@media(hover:none)]:opacity-100"
+					>
+						Compare answers
+					</button>
+				)}
 			</div>
-			<div className="mb-3 font-medium">
+			<div className="mb-3 font-medium" data-listen-block="Question">
 				<ToolContentResponse>{answer.questionText}</ToolContentResponse>
 			</div>
 			{parsedDetails && (
 				// The details line, same paint as the pending dock (owner,
 				// 2026-10-12): full markdown, LaTeX included.
-				<div className="mb-3 text-sm text-muted-foreground">
+				<div className="mb-3 text-sm text-muted-foreground" data-listen-block="Details">
 					<ToolContentResponse>{parsedDetails}</ToolContentResponse>
 				</div>
 			)}
 
 			{((answer.options?.length ?? 0) > 0 || answer.other) && (
-				<div className="flex flex-col gap-1.5 text-sm">
+				<div className="flex flex-col gap-1.5 text-sm" data-listen-block="Options">
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
 						const key = isQuiz && correctIdx.has(opt.index);
@@ -160,7 +182,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 				</div>
 			)}
 
-			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
+			{answer.text && (
+				<div ref={yourAnswerRef} className="lh-prose mt-2 whitespace-pre-wrap" data-listen-block="Your answer">
+					“<PathText text={answer.text} />”
+				</div>
+			)}
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
@@ -191,6 +217,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					label="YOUR THINKING"
 					text={answer.thinking ?? answer.note ?? ""}
 					inCard
+					listenLabel="Your thinking"
 				/>
 			)}
 
@@ -211,7 +238,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 						{whyOpen ? "Hide why" : "Why"}
 					</button>
 					{whyOpen && (
-						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50">
+						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50" data-listen-block="Why">
 							<span className="font-medium text-muted-foreground">Why: </span>
 							{/* Keep the first paragraph beside the label, not every paragraph:
 							   later paragraphs must retain their recovered document structure. */}
@@ -225,7 +252,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			    — one field, reasoning included — shown on submit; no verdict,
 			    the model's next reply IS the grading. */}
 			{isExplain && answer.committed && (
-				<div className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground">
+				<div ref={committedRef} className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground" data-listen-block="The answer">
 					<span className="font-medium text-foreground">The answer: </span>
 					<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.committed}</ToolContentResponse>
 				</div>

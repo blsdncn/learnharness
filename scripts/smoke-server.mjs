@@ -27,6 +27,7 @@
 import { spawn } from "node:child_process";
 import { probeEnv, verifyDemoRuntime } from "./smoke-demo-runtime.mjs";
 import { verifyProviderRuntime } from "./smoke-provider-runtime.mjs";
+import { verifySpeechRuntime } from "./smoke-speech-runtime.mjs";
 import { verifyCompressionRuntime } from "./smoke-compression-runtime.mjs";
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
@@ -84,6 +85,9 @@ async function main() {
 	verifyDemoRuntime(STANDALONE, RUNTIME);
 	// /api/models only reads catalogs; initialize the real lazy SDK offline too.
 	verifyProviderRuntime(STANDALONE, RUNTIME);
+	// A successful MP3 response can mask the route's raw-TeX fallback.
+	// Exercise the real engine and its dynamic XML/XPath dependencies.
+	verifySpeechRuntime(STANDALONE, RUNTIME);
 	// A plain GET without Accept-Encoding never exercises gzip backpressure.
 	verifyCompressionRuntime(STANDALONE, RUNTIME);
 	const port = await freePort();

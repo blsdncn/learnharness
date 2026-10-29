@@ -45,6 +45,7 @@ import {
 	type RoleModelOverride,
 	type UserSettings,
 } from "./settings.ts";
+import { ttsConnection, type AudioConnection } from "./audio-connection.ts";
 
 /** A configured model slot: the tier's concrete model, with its optional
  *  thinking level. UNSET level is legal — the engine build resolves it
@@ -97,6 +98,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is the provider. */
+	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean; autoplay: boolean } & AudioConnection;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
@@ -225,6 +228,13 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		speech: {
+			enabled: record?.speech?.enabled,
+			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
+			readQuestion: record?.speech?.readQuestion ?? false,
+			autoplay: record?.speech?.autoplay ?? false,
+			...ttsConnection(record?.speech?.provider, record?.customTtsProvider, record?.speech?.customModel),
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

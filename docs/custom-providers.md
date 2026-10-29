@@ -38,6 +38,28 @@ Configuration is not a continuous health check. An endpoint may be configured wh
 offline, and model capability or output quality is not proven by listing its ID.
 No backend/model installation, downloads, or OAuth flows are performed.
 
+The form shows where requests go, live from the typed URL: chat calls
+`POST <base>/chat/completions`, and models are listed from `<base>/models`.
+
+## TTS endpoint
+
+Add one custom TTS endpoint from **Settings → Providers → TTS → + Add a
+provider → Custom endpoint**. It reuses the chat endpoint's editor and
+connection flow: the base URL is used as typed, authentication is Keyless or
+API key, and manual model IDs supplement or replace discovery from `/models`.
+The form shows the synthesis path, `POST <base>/audio/speech`.
+
+TTS stores its own connection at `customTtsProvider`, connected through
+`/api/tts/custom-endpoint`, with `CUSTOM_TTS_API_KEY` bound to its URL.
+Changing the URL requires a new key or explicit consent to reuse the effective
+key. The chat endpoint and its credentials stay independent, even when both
+use the same server.
+
+Connecting does not switch providers: choose **Custom endpoint** in the TTS
+Provider dropdown, then pick a model from the endpoint's list. TTS endpoints
+have no chat budget pins and are not registered as chat providers. An endpoint
+listing a model does not prove it supports speech synthesis.
+
 ## Model budgets and reasoning support
 
 Settings exposes offline-editable pins per model:

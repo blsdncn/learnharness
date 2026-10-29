@@ -1,7 +1,26 @@
 /** Private custom credential authorization; no credential-derived public value. */
 import { normalizeBaseUrl, type CustomProviderSettings } from "./settings.ts";
+import { CUSTOM_PROVIDER } from "./auth-keys.ts";
+import { CUSTOM_TTS_KEY_ID } from "./audio-connection.ts";
 
 export const CUSTOM_AUTH_BINDING = "__learnharness_custom_provider_binding";
+
+/** One custom OpenAI-compatible endpoint: chat (the pi-ai provider), TTS. Each is a singleton with its own settings entry, its own key
+ *  (auth.json entry + env var), and its own binding of that key to its URL. */
+export interface CustomEndpointKind {
+	/** Top-level settings key — never a PUT section. */
+	settingsKey: "customProvider" | "customTtsProvider";
+	envVar: string;
+	/** The reserved auth.json entry binding the key to the endpoint. */
+	binding: string;
+}
+export const CHAT_ENDPOINT: CustomEndpointKind = { settingsKey: "customProvider", envVar: CUSTOM_PROVIDER.envVar, binding: CUSTOM_AUTH_BINDING };
+export const TTS_ENDPOINT: CustomEndpointKind = { settingsKey: "customTtsProvider", envVar: CUSTOM_TTS_KEY_ID, binding: "__learnharness_custom_tts_binding" };
+export const CUSTOM_ENDPOINTS: readonly CustomEndpointKind[] = [CHAT_ENDPOINT, TTS_ENDPOINT];
+/** A reserved binding entry: never a key, never shown or hand-edited. */
+export const isCustomBindingName = (name: string) => CUSTOM_ENDPOINTS.some((k) => k.binding === name);
+/** A custom endpoint's key: written only through its endpoint editor. */
+export const isCustomKeyName = (name: string) => CUSTOM_ENDPOINTS.some((k) => k.envVar === name);
 export interface CustomAuthBinding {
 	version: 1;
 	id: string;
