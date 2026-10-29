@@ -1,7 +1,7 @@
 /**
  * Text-to-speech (listen wave, 2026-10-26).
  *
- *   GET  → {configured, keyPresent, custom, baseUrl, model, voice} — the listening
+ *   GET  → {configured, keyPresent, custom, baseUrl, model, voice, readQuestion} — the listening
  *          UI shows its affordances when listening is enabled.
  *   POST {parts: [{text} | {tex}]} → audio/mpeg for one listenable block,
  *          streamed from OpenAI or the custom endpoint. 503 when

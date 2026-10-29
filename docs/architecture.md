@@ -46,7 +46,11 @@ loopback address.
 transcript and dock roots. Plan, reasoning, code blocks, and drawings are
 excluded. KaTeX source annotations supply TeX once per equation. A table
 reads row by row: the header row as-is, every other row with each cell
-under its column header.
+under its column header. With "Read the question" on (Settings → TTS), a
+read that started in the transcript continues into the dock's question or
+practice problem; a folded dock opens when no scroll is needed and is
+otherwise read hidden (a folded practice bar carries a hidden copy of its
+statement for this).
 `listen-controller.ts` owns one audio element and a reading queue, prefetches
 the next block, and fences late responses after stop or restart. Playback
 speed is stored in browser localStorage. `listen.tsx` supplies one shared

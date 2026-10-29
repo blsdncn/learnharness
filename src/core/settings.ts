@@ -371,6 +371,9 @@ export interface SpeechSettings extends AudioEndpointSettings {
 	/** Listening is opt-in: unset = off. */
 	enabled?: boolean;
 	voice?: string;
+	/** Read from here continues from the transcript into the dock's open
+	 *  question or practice problem. Unset = off. */
+	readQuestion?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -668,6 +671,8 @@ function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
 	if (enabled !== undefined) out.enabled = enabled;
 	const voice = sanitizeSpeechId(raw.voice);
 	if (voice) out.voice = voice;
+	const readQuestion = boolOrDrop(raw.readQuestion);
+	if (readQuestion !== undefined) out.readQuestion = readQuestion;
 	return { ...out, ...sanitizeAudioEndpoint(raw) };
 }
 

@@ -86,16 +86,25 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	/* ── the collapsed bar ── */
 	if (!expanded) {
 		return (
-			<button
-				type="button"
-				data-testid="practice-dock-bar"
-				onClick={onExpand}
-				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-			>
-				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
-				<span className="font-medium">Problem</span>
-				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
-			</button>
+			<>
+				<button
+					type="button"
+					data-testid="practice-dock-bar"
+					onClick={onExpand}
+					className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+				>
+					<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
+					<span className="font-medium">Problem</span>
+					<span className="min-w-0 flex-1 truncate">{input.statement}</span>
+				</button>
+				{/* The statement, rendered but hidden, so "Read the question"
+				    (Settings → TTS) can read a folded problem. */}
+				<div className="invisible h-0 overflow-hidden" data-testid="practice-dock-hidden-problem">
+					<div className="lh-prose text-[15px]" data-listen-block="Problem">
+						<ToolContentResponse>{input.statement}</ToolContentResponse>
+					</div>
+				</div>
+			</>
 		);
 	}
 

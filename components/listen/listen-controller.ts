@@ -7,7 +7,9 @@
  * Two queue shapes:
  * - "from": read from a block onward through its root (owner ruling:
  *   read-from-here, the Speechify model) — the next block is found in the
- *   live DOM at each advance, so blocks that streamed in meanwhile count;
+ *   live DOM at each advance, so blocks that streamed in meanwhile count.
+ *   With readQuestion on, a read from the transcript continues into the
+ *   dock (speech-dom adjacentAcross);
  * - "list": exactly these blocks (Compare: your answer, then the correct
  *   answer).
  *
@@ -15,7 +17,7 @@
  * the current one plays, so only the first block waits.
  */
 
-import { adjacentBlock, blockLabel, rootOf, speechParts } from "./speech-dom";
+import { LISTEN_BLOCK_ATTR, LISTEN_ENTER_DOCK_EVENT, adjacentAcross, adjacentBlock, blockLabel, dockRoot, dockSection, rootOf, speechParts } from "./speech-dom";
 
 export type ListenStatus = "idle" | "loading" | "playing" | "paused" | "error";
 
@@ -67,6 +69,10 @@ export class ListenController {
 	private session = 0;
 	private queue: Queue | null = null;
 	private clips = new Map<Element, { abort: AbortController; url: Promise<string> }>();
+	/** "Read the question" (Settings → TTS), kept current by the provider. */
+	readQuestion = false;
+	/** The block being read is a dock section (see activeBlock). */
+	private inDock = false;
 
 	constructor() {
 		const stored = typeof localStorage === "undefined" ? null : Number(localStorage.getItem(RATE_KEY));
@@ -83,6 +89,18 @@ export class ListenController {
 	private set(patch: Partial<ListenSnapshot>) {
 		this.snapshot = { ...this.snapshot, ...patch };
 		for (const l of this.listeners) l();
+	}
+
+	/** The block being read, live. A dock section that re-rendered (the
+	 *  folded practice bar's hidden Problem swapped for the open dock's) is
+	 *  found again by its label, so the highlight follows the dock opening. */
+	activeBlock(): Element | null {
+		const block = this.snapshot.block;
+		if (!block || block.isConnected) return block;
+		if (!this.inDock) return null;
+		const again = this.sameSection(block);
+		if (again) this.set({ block: again });
+		return again;
 	}
 
 	/** The live element, for progress readers (the pill's bar). */
@@ -112,6 +130,7 @@ export class ListenController {
 			this.audio.pause();
 			this.audio.removeAttribute("src");
 		}
+		this.inDock = false;
 		this.set({ status: "idle", block: null, label: "", position: null, error: null });
 	}
 
@@ -166,15 +185,21 @@ export class ListenController {
 		void a.play().catch(() => {});
 		this.dropClips();
 		this.queue = queue;
-		this.goTo(first);
+		this.goTo(first, true);
 	}
 
 	private neighbor(dir: 1 | -1): Element | null {
 		const q = this.queue;
-		const at = this.snapshot.block;
+		const at = this.activeBlock() ?? this.snapshot.block;
 		if (!q || !at) return null;
 		if (q.kind === "list") return q.blocks[q.blocks.indexOf(at) + dir] ?? null;
-		return adjacentBlock(at, q.root, dir);
+		return this.readQuestion ? adjacentAcross(at, q.root, dir) : adjacentBlock(at, q.root, dir);
+	}
+
+	/** The open dock's copy of a dock section that re-rendered away. */
+	private sameSection(block: Element): Element | null {
+		const label = block.getAttribute(LISTEN_BLOCK_ATTR);
+		return label ? dockSection(document, label) : null;
 	}
 
 	private position(block: Element): ListenSnapshot["position"] {
@@ -182,7 +207,15 @@ export class ListenController {
 		return q?.kind === "list" ? { index: q.blocks.indexOf(block), total: q.blocks.length } : null;
 	}
 
-	private goTo(block: Element) {
+	/** `first`: the queue's first block — nothing was read before it. */
+	private goTo(block: Element, first = false) {
+		const wasInDock = this.inDock;
+		this.inDock = dockRoot(document)?.contains(block) ?? false;
+		if (this.inDock && !wasInDock && !first) {
+			// Crossing into the dock: the chat may open it (activeBlock
+			// follows a section the opening re-renders).
+			document.dispatchEvent(new Event(LISTEN_ENTER_DOCK_EVENT));
+		}
 		const session = ++this.session;
 		const a = this.ensureAudio();
 		a.pause();

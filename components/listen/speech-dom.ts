@@ -4,7 +4,9 @@
  *
  * A ROOT (`data-listen-root`) bounds "read from here": the transcript is
  * one root, the dock another — playback continues through the blocks that
- * follow inside the same root and never jumps between them.
+ * follow inside the same root. One crossing, opt-in ("Read the question",
+ * Settings → TTS): reading that started in the transcript continues into
+ * the dock (adjacentAcross).
  *
  * A BLOCK is the smallest reading unit (owner ruling: paragraph-level):
  * - prose: every paragraph, list item, heading, quote, or display equation
@@ -28,6 +30,9 @@ import type { SpeechPart } from "@/src/core";
 export const LISTEN_ROOT_ATTR = "data-listen-root";
 export const LISTEN_BLOCK_ATTR = "data-listen-block";
 export const LISTEN_SKIP_ATTR = "data-listen-skip";
+/** Fired on the document as reading crosses from the transcript into the
+ *  dock: the chat opens a folded dock when no scroll is needed. */
+export const LISTEN_ENTER_DOCK_EVENT = "lh:listen-enter-dock";
 
 const PROSE = "p, li, h1, h2, h3, h4, h5, h6, blockquote, .katex-display";
 /** Prose that makes its container a non-leaf (display math does not: a
@@ -78,6 +83,32 @@ export function adjacentBlock(block: Element, root: Element, dir: 1 | -1): Eleme
 	if (!block.isConnected) return null;
 	const following = all.filter((b) => block.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 	return dir === 1 ? (following[0] ?? null) : (all[all.length - following.length - 1] ?? null);
+}
+
+/** adjacentBlock for a read that started in `start`, with "Read the
+ *  question" on: past the transcript's end into the dock's first block,
+ *  and Previous from there back to the transcript's last. Never from the
+ *  dock up into the transcript. */
+export function adjacentAcross(block: Element, start: Element, dir: 1 | -1): Element | null {
+	const root = rootOf(block) ?? start;
+	const near = adjacentBlock(block, root, dir);
+	if (near || start.getAttribute(LISTEN_ROOT_ATTR) !== "transcript") return near;
+	if (dir === 1 && root === start) {
+		const dock = dockRoot(start.ownerDocument);
+		return dock ? (blocksIn(dock)[0] ?? null) : null;
+	}
+	if (dir === -1 && root !== start && start.isConnected) return blocksIn(start).at(-1) ?? null;
+	return null;
+}
+
+export function dockRoot(doc: Document): Element | null {
+	return doc.querySelector(`[${LISTEN_ROOT_ATTR}="dock"]`);
+}
+
+/** The dock's section named `label` (Question, Options, Problem…). */
+export function dockSection(doc: Document, label: string): Element | null {
+	const sections = dockRoot(doc)?.querySelectorAll(`[${LISTEN_BLOCK_ATTR}]`) ?? [];
+	return [...sections].find((el) => el.getAttribute(LISTEN_BLOCK_ATTR) === label) ?? null;
 }
 
 export function rootOf(block: Element): Element | null {

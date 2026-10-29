@@ -75,6 +75,10 @@ describe("PracticeDock", () => {
 		);
 		assert.match(html, /data-testid="practice-dock-bar"/);
 		assert.match(html, /Show that the sum is even\./);
+		// Read the question (Settings → TTS) reads a folded problem from a
+		// hidden copy of its statement.
+		assert.match(html, /data-testid="practice-dock-hidden-problem"[^>]*>\s*<div[^>]*data-listen-block="Problem"/);
+		assert.match(html, /class="invisible h-0 overflow-hidden" data-testid="practice-dock-hidden-problem"/);
 	});
 });
 

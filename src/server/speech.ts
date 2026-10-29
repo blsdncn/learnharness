@@ -31,11 +31,13 @@ export interface SpeechStatus {
 	baseUrl: string | null;
 	model: string;
 	voice: string;
+	/** Read from here continues into the dock (Settings → TTS). */
+	readQuestion: boolean;
 }
 
 export function speechStatus(): SpeechStatus {
-	const { enabled, voice, custom, baseUrl, model, keyId } = effectiveSettings().speech;
-	return { configured: enabled ?? false, keyPresent: Boolean(keyValue(keyId)), custom, baseUrl, model, voice };
+	const { enabled, voice, readQuestion, custom, baseUrl, model, keyId } = effectiveSettings().speech;
+	return { configured: enabled ?? false, keyPresent: Boolean(keyValue(keyId)), custom, baseUrl, model, voice, readQuestion };
 }
 
 /** A refusal carrying the HTTP status the route should answer with. */

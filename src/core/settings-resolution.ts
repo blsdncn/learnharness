@@ -98,7 +98,7 @@ export interface EffectiveSettings {
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
 	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is on. */
-	speech: { enabled: boolean | undefined; voice: string } & AudioConnection;
+	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean } & AudioConnection;
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -230,6 +230,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		speech: {
 			enabled: record?.speech?.enabled,
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
+			readQuestion: record?.speech?.readQuestion ?? false,
 			...ttsConnection(record?.speech),
 		},
 	};

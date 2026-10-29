@@ -2,7 +2,8 @@
 
 /**
  * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
- * session's listen affordances read through. Listening is opt-in. OpenAI
+ * session's listen affordances read through. Listening is opt-in, and so
+ * is reading on from the transcript into the dock's question. OpenAI
  * with your OpenAI key by default; Advanced switches to a custom
  * OpenAI-compatible endpoint (audio-endpoint.tsx).
  */
@@ -115,6 +116,13 @@ export function SpeechSection({
 					disabled={status === null}
 					onChange={(enabled) => onSectionChange({ ...speech, enabled })}
 					label="Listening"
+				/>
+			</SettingsRow>
+			<SettingsRow label="Read the question" hint="Read from here continues into the open question or problem" testid="speech-row-read-question">
+				<Toggle
+					checked={speech?.readQuestion ?? false}
+					onChange={(readQuestion) => onSectionChange({ ...speech, readQuestion })}
+					label="Read the question"
 				/>
 			</SettingsRow>
 			<SettingsRow

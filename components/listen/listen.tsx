@@ -6,7 +6,8 @@
  * Owner rulings: hover any paragraph-level block → ONE shared speaker in
  * its gutter (the md-blocks "one affordance" stance: nothing shows until
  * you're over it, nothing shifts layout); click → read from there through
- * the rest of that root; a pill player only while something plays. Touch
+ * the rest of that root (and on into the dock's question with "Read the
+ * question" on); a pill player only while something plays. Touch
  * input taps a block to reveal its speaker instead — decided PER POINTER
  * EVENT (pointerType), so a desktop browser over remote access keeps the
  * hover behavior and only real touch gets the tap behavior.
@@ -49,9 +50,15 @@ export function useListenSnapshot(): ListenSnapshot {
 	);
 }
 
-/** Is speech configured? Re-read whenever keys or the speech section save. */
-function useSpeechConfigured(): boolean {
-	const [configured, setConfigured] = useState(false);
+interface SpeechPrefs {
+	configured: boolean;
+	readQuestion: boolean;
+}
+
+/** Is speech configured, and does reading continue into the question?
+ *  Re-read whenever keys or the speech section save. */
+function useSpeechPrefs(): SpeechPrefs {
+	const [prefs, setPrefs] = useState<SpeechPrefs>({ configured: false, readQuestion: false });
 	const [tick, setTick] = useState(0);
 	useSettingsSaved((section) => {
 		if (section === "keys" || section === "speech") setTick((t) => t + 1);
@@ -59,21 +66,24 @@ function useSpeechConfigured(): boolean {
 	useEffect(() => {
 		let live = true;
 		fetch("/api/tts/openai")
-			.then((r) => (r.ok ? (r.json() as Promise<{ configured?: boolean }>) : null))
-			.then((s) => live && setConfigured(s?.configured === true))
-			.catch(() => live && setConfigured(false));
+			.then((r) => (r.ok ? (r.json() as Promise<{ configured?: boolean; readQuestion?: boolean }>) : null))
+			.then((s) => live && setPrefs({ configured: s?.configured === true, readQuestion: s?.readQuestion === true }))
+			.catch(() => live && setPrefs({ configured: false, readQuestion: false }));
 		return () => {
 			live = false;
 		};
 	}, [tick]);
-	return configured;
+	return prefs;
 }
 
 const INTERACTIVE = "a, button, input, textarea, select, label, summary, [contenteditable], [role='button']";
 
 export function ListenProvider({ children }: { children: ReactNode }) {
 	const [controller] = useState(() => (typeof window === "undefined" ? null : new ListenController()));
-	const configured = useSpeechConfigured();
+	const { configured, readQuestion } = useSpeechPrefs();
+	useEffect(() => {
+		if (controller) controller.readQuestion = readQuestion;
+	}, [controller, readQuestion]);
 	useEffect(() => () => controller?.stop(), [controller]);
 	useEffect(() => { if (!configured) controller?.stop(); }, [configured, controller]);
 	return (
@@ -166,7 +176,7 @@ function ListenOverlay({ controller }: { controller: ListenController }) {
 			const highlight = highlightRef.current;
 			if (!speaker || !highlight) return;
 			const block = hovered.current?.isConnected ? hovered.current : null;
-			const active = controller.getSnapshot().block;
+			const active = controller.activeBlock();
 			if (block && block !== active) {
 				const r = visibleRect(block);
 				const root = block.closest(`[${LISTEN_ROOT_ATTR}]`)?.getBoundingClientRect();
@@ -187,7 +197,9 @@ function ListenOverlay({ controller }: { controller: ListenController }) {
 				speaker.style.opacity = "0";
 				speaker.style.pointerEvents = "none";
 			}
-			if (active?.isConnected) {
+			// A folded dock's section is read while hidden: no highlight until
+			// the dock opens.
+			if (active?.isConnected && getComputedStyle(active).visibility !== "hidden") {
 				const r = visibleRect(active);
 				highlight.style.transform = `translate(${Math.round(r.left - 6)}px, ${Math.round(r.top - 2)}px)`;
 				highlight.style.width = `${Math.round(r.width + 12)}px`;
