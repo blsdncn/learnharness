@@ -115,6 +115,12 @@ describe("TTS settings: OpenAI by default, a custom endpoint under Advanced", ()
 		assert.deepEqual(saved, { baseUrl: "http://local.test/v1", model: "tts-1", voice: "alloy", readQuestion: true });
 		assert.equal(button("toggle-read-the-question").getAttribute("aria-checked"), "true");
 	});
+	it("Autoplay replies is off by default and saves with the rest of the section", async () => {
+		await mount();
+		assert.equal(button("toggle-autoplay-replies").getAttribute("aria-checked"), "false");
+		await click("toggle-autoplay-replies");
+		assert.deepEqual(saved, { baseUrl: "http://local.test/v1", model: "tts-1", voice: "alloy", autoplay: true });
+	});
 	it("by default uses the OpenAI key; a missing one links to Providers", async () => {
 		await mount();
 		const missing = button("speech-endpoint-openai-missing");

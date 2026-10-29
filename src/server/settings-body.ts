@@ -423,7 +423,7 @@ function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyR
 }
 
 /** speech (listen wave, 2026-10-26): listening, the voice, reading into
- *  the question, and the custom
+ *  the question, autoplay, and the custom
  *  endpoint. Replace-whole, like every section. */
 export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<SpeechSettings> {
 	const raw = asRecord(body);
@@ -433,9 +433,10 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
 		settings.enabled = raw.enabled;
 	}
-	if (raw.readQuestion !== undefined) {
-		if (typeof raw.readQuestion !== "boolean") return { ok: false, error: "readQuestion must be a boolean" };
-		settings.readQuestion = raw.readQuestion;
+	for (const key of ["readQuestion", "autoplay"] as const) {
+		if (raw[key] === undefined) continue;
+		if (typeof raw[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
+		settings[key] = raw[key];
 	}
 	const voice = parseSpeechId(raw, "voice");
 	if (!voice.ok) return voice;

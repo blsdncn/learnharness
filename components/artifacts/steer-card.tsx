@@ -7,6 +7,7 @@ import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
+import { LISTEN_ASIDE_ATTR } from "@/components/listen/speech-dom";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -84,7 +85,7 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 	// the ?? is runtime tolerance for pre-split persisted steers.
 	const readPages = result.pagesRead ?? result.pagesConsulted;
 	return (
-		<details data-testid="pdf-complete-badge" className="group w-full text-xs text-muted-foreground">
+		<details data-testid="pdf-complete-badge" {...{ [LISTEN_ASIDE_ATTR]: "" }} className="group w-full text-xs text-muted-foreground">
 			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
 				<CheckIcon className="size-3.5" />
 				<span className="font-medium uppercase tracking-wide">PDF</span>
@@ -111,7 +112,7 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
  * the artifact part in the record is the single source of truth. */
 function ResearchCompleteBadge({ result }: { result: ResearchResult }) {
 	return (
-		<details data-testid="research-complete-badge" className="group w-full text-xs text-muted-foreground">
+		<details data-testid="research-complete-badge" {...{ [LISTEN_ASIDE_ATTR]: "" }} className="group w-full text-xs text-muted-foreground">
 			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
 				<CheckIcon className="size-3.5" />
 				<span className="font-medium uppercase tracking-wide">Research</span>

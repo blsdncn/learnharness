@@ -18,7 +18,9 @@
  * - a table ROW (owner ruling: row by row, with headers): the header row
  *   reads as-is, every other row pairs each cell with its column header —
  *   "Stage: Validate. What it accomplishes: Compare…".
- * Anything under `data-listen-skip` (reasoning, the plan) is never a block.
+ * Anything under `data-listen-skip` (reasoning, the plan) is never a block,
+ * nor is anything in a collapsed <details> (a tool card's details, a
+ * research brief) — it isn't on screen; opened, it reads like the rest.
  *
  * What a block SAYS: its text in reading order with math as TeX (KaTeX
  * keeps the source in its MathML annotation; the server speaks it), minus
@@ -30,6 +32,12 @@ import type { SpeechPart } from "@/src/core";
 export const LISTEN_ROOT_ATTR = "data-listen-root";
 export const LISTEN_BLOCK_ATTR = "data-listen-block";
 export const LISTEN_SKIP_ATTR = "data-listen-skip";
+/** Read only by a read started inside it, even open (the research and
+ *  PDF briefs); reads from elsewhere, autoplay included, pass over it. */
+export const LISTEN_ASIDE_ATTR = "data-listen-aside";
+/** The learner's own rows (your message, answer card, thinking): never
+ *  where an autoplayed reply starts. */
+export const LISTEN_YOURS_ATTR = "data-listen-yours";
 /** Fired on the document as reading crosses from the transcript into the
  *  dock: the chat opens a folded dock when no scroll is needed. */
 export const LISTEN_ENTER_DOCK_EVENT = "lh:listen-enter-dock";
@@ -47,7 +55,18 @@ const BOUNDARY = "p, div, li, ul, ol, button, h1, h2, h3, h4, h5, h6, blockquote
 const UNSPOKEN = "pre, svg, canvas, img, video, audio, input, textarea, select, script, style, [aria-hidden='true']";
 
 function inRoot(el: Element, root: Element): boolean {
-	return root.contains(el) && !el.closest(`[${LISTEN_SKIP_ATTR}]`);
+	return root.contains(el) && !el.closest(`[${LISTEN_SKIP_ATTR}]`) && !isCollapsed(el);
+}
+
+/** Is `el` inside a collapsed <details> (and not in its summary, which
+ *  stays on screen)? */
+export function isCollapsed(el: Element): boolean {
+	for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) {
+		if (d.hasAttribute("open")) continue;
+		const summary = [...d.children].find((c) => c.matches("summary"));
+		if (!summary?.contains(el)) return true;
+	}
+	return false;
 }
 
 /** The listenable block containing `target` inside `root`, or null. */
@@ -103,12 +122,6 @@ export function adjacentAcross(block: Element, start: Element, dir: 1 | -1): Ele
 
 export function dockRoot(doc: Document): Element | null {
 	return doc.querySelector(`[${LISTEN_ROOT_ATTR}="dock"]`);
-}
-
-/** The dock's section named `label` (Question, Options, Problem…). */
-export function dockSection(doc: Document, label: string): Element | null {
-	const sections = dockRoot(doc)?.querySelectorAll(`[${LISTEN_BLOCK_ATTR}]`) ?? [];
-	return [...sections].find((el) => el.getAttribute(LISTEN_BLOCK_ATTR) === label) ?? null;
 }
 
 export function rootOf(block: Element): Element | null {

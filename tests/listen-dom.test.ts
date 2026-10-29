@@ -42,7 +42,7 @@ const { document, window } = parseHTML(`<!doctype html><html><body>
 </body></html>`);
 Object.assign(globalThis, { Node: window.Node, Element: window.Element });
 
-const { adjacentBlock, blockFor, blockLabel, blocksIn, speechParts } = await import("../components/listen/speech-dom.ts");
+const { adjacentBlock, blockFor, blockLabel, blocksIn, isCollapsed, speechParts } = await import("../components/listen/speech-dom.ts");
 
 const $ = (id: string) => document.getElementById(id)!;
 const transcript = document.querySelector('[data-listen-root="transcript"]')!;
@@ -77,6 +77,29 @@ describe("blocks", () => {
 	it("labels: the section's name, or Reading for prose", () => {
 		assert.equal(blockLabel($("ta")), "The answer");
 		assert.equal(blockLabel($("p1")), "Reading");
+	});
+});
+
+describe("collapsed sections", () => {
+	const { document: doc } = parseHTML(`<!doctype html><html><body><div data-listen-root="transcript">
+	  <p id="before">Before.</p>
+	  <details id="brief"><summary><p id="sum">Research complete</p></summary><p id="inside">Hidden finding.</p></details>
+	  <p id="after">After.</p>
+	</div></body></html>`);
+	const root = doc.querySelector("[data-listen-root]")!;
+	const ids = () => blocksIn(root).map((b) => b.id);
+	it("collapsed: not a block, can't be started in, and reading passes over it", () => {
+		assert.deepEqual(ids(), ["before", "sum", "after"], "the summary stays readable");
+		assert.equal(blockFor(doc.getElementById("inside")!, root), null);
+		assert.equal(adjacentBlock(doc.getElementById("sum")!, root, 1), doc.getElementById("after"));
+		assert.equal(isCollapsed(doc.getElementById("inside")!), true);
+		assert.equal(isCollapsed(doc.getElementById("sum")!), false);
+	});
+	it("opened: reads like the rest", () => {
+		doc.getElementById("brief")!.setAttribute("open", "");
+		assert.deepEqual(ids(), ["before", "sum", "inside", "after"]);
+		assert.equal(blockFor(doc.getElementById("inside")!, root), doc.getElementById("inside"));
+		doc.getElementById("brief")!.removeAttribute("open");
 	});
 });
 

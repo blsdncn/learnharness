@@ -7,7 +7,9 @@
  * its gutter (the md-blocks "one affordance" stance: nothing shows until
  * you're over it, nothing shifts layout); click → read from there through
  * the rest of that root (and on into the dock's question with "Read the
- * question" on); a pill player only while something plays. Touch
+ * question" on); a pill player only while something plays. "Autoplay
+ * replies" starts the same read on the reply to a turn you start
+ * (listen-controller armAutoplay; the chat arms it on each send). Touch
  * input taps a block to reveal its speaker instead — decided PER POINTER
  * EVENT (pointerType), so a desktop browser over remote access keeps the
  * hover behavior and only real touch gets the tap behavior.
@@ -26,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { LISTEN_RATES, ListenController, type ListenSnapshot } from "./listen-controller";
-import { LISTEN_ROOT_ATTR, blockFor } from "./speech-dom";
+import { LISTEN_ROOT_ATTR, blockFor, isCollapsed } from "./speech-dom";
 
 interface ListenApi {
 	controller: ListenController | null;
@@ -53,12 +55,15 @@ export function useListenSnapshot(): ListenSnapshot {
 interface SpeechPrefs {
 	configured: boolean;
 	readQuestion: boolean;
+	autoplay: boolean;
 }
 
-/** Is speech configured, and does reading continue into the question?
- *  Re-read whenever keys or the speech section save. */
+const OFF: SpeechPrefs = { configured: false, readQuestion: false, autoplay: false };
+
+/** Is speech configured, does reading continue into the question, and
+ *  are replies autoplayed? Re-read whenever keys or the speech section save. */
 function useSpeechPrefs(): SpeechPrefs {
-	const [prefs, setPrefs] = useState<SpeechPrefs>({ configured: false, readQuestion: false });
+	const [prefs, setPrefs] = useState<SpeechPrefs>(OFF);
 	const [tick, setTick] = useState(0);
 	useSettingsSaved((section) => {
 		if (section === "keys" || section === "speech") setTick((t) => t + 1);
@@ -66,9 +71,9 @@ function useSpeechPrefs(): SpeechPrefs {
 	useEffect(() => {
 		let live = true;
 		fetch("/api/tts/openai")
-			.then((r) => (r.ok ? (r.json() as Promise<{ configured?: boolean; readQuestion?: boolean }>) : null))
-			.then((s) => live && setPrefs({ configured: s?.configured === true, readQuestion: s?.readQuestion === true }))
-			.catch(() => live && setPrefs({ configured: false, readQuestion: false }));
+			.then((r) => (r.ok ? (r.json() as Promise<Partial<SpeechPrefs>>) : null))
+			.then((s) => live && setPrefs({ configured: s?.configured === true, readQuestion: s?.readQuestion === true, autoplay: s?.autoplay === true }))
+			.catch(() => live && setPrefs(OFF));
 		return () => {
 			live = false;
 		};
@@ -80,10 +85,12 @@ const INTERACTIVE = "a, button, input, textarea, select, label, summary, [conten
 
 export function ListenProvider({ children }: { children: ReactNode }) {
 	const [controller] = useState(() => (typeof window === "undefined" ? null : new ListenController()));
-	const { configured, readQuestion } = useSpeechPrefs();
+	const { configured, readQuestion, autoplay } = useSpeechPrefs();
 	useEffect(() => {
-		if (controller) controller.readQuestion = readQuestion;
-	}, [controller, readQuestion]);
+		if (!controller) return;
+		controller.readQuestion = readQuestion;
+		controller.autoplay = configured && autoplay;
+	}, [controller, readQuestion, autoplay, configured]);
 	useEffect(() => () => controller?.stop(), [controller]);
 	useEffect(() => { if (!configured) controller?.stop(); }, [configured, controller]);
 	return (
@@ -198,8 +205,9 @@ function ListenOverlay({ controller }: { controller: ListenController }) {
 				speaker.style.pointerEvents = "none";
 			}
 			// A folded dock's section is read while hidden: no highlight until
-			// the dock opens.
-			if (active?.isConnected && getComputedStyle(active).visibility !== "hidden") {
+			// the dock opens. Nor on a section collapsed mid-read.
+			const waiting = controller.getSnapshot().status === "waiting";
+			if (active?.isConnected && !waiting && !isCollapsed(active) && getComputedStyle(active).visibility !== "hidden") {
 				const r = visibleRect(active);
 				highlight.style.transform = `translate(${Math.round(r.left - 6)}px, ${Math.round(r.top - 2)}px)`;
 				highlight.style.width = `${Math.round(r.width + 12)}px`;
@@ -297,7 +305,11 @@ export function ListenPill({ className }: { className?: string }) {
 						{s.position && ` · ${s.position.index + 1}/${s.position.total}`}
 					</span>
 					<span className="mx-1 flex w-14 shrink-0 items-center">
-						{s.status === "loading" ? <BrailleSpinner className="h-3" label="Loading speech" /> : <ListenProgress controller={controller} />}
+						{s.status === "loading" || s.status === "waiting" ? (
+							<BrailleSpinner className="h-3" label={s.status === "waiting" ? "Waiting for the reply" : "Loading speech"} />
+						) : (
+							<ListenProgress controller={controller} />
+						)}
 					</span>
 					<button type="button" aria-label="Previous block" className={pillButton} onClick={() => controller.prev()}>
 						<SkipBackIcon className="size-3.5" />
@@ -307,7 +319,7 @@ export function ListenPill({ className }: { className?: string }) {
 						aria-label={s.status === "paused" ? "Resume" : "Pause"}
 						data-testid="listen-toggle"
 						className={pillButton}
-						disabled={s.status === "loading"}
+						disabled={s.status === "loading" || s.status === "waiting"}
 						onClick={() => controller.togglePause()}
 					>
 						{s.status === "paused" ? <PlayIcon className="size-3.5" /> : <PauseIcon className="size-3.5" />}

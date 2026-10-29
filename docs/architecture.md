@@ -44,7 +44,8 @@ loopback address.
 
 `components/listen/speech-dom.ts` identifies reading blocks within separate
 transcript and dock roots. Plan, reasoning, code blocks, and drawings are
-excluded. KaTeX source annotations supply TeX once per equation. A table
+excluded, as is anything inside a collapsed `<details>` (tool-card details,
+research and PDF briefs) until it is opened. KaTeX source annotations supply TeX once per equation. A table
 reads row by row: the header row as-is, every other row with each cell
 under its column header. With "Read the question" on (Settings → TTS), a
 read that started in the transcript continues into the dock's question or
@@ -52,7 +53,16 @@ practice problem; a folded dock opens when no scroll is needed and is
 otherwise read hidden (a folded practice bar carries a hidden copy of its
 statement for this).
 `listen-controller.ts` owns one audio element and a reading queue, prefetches
-the next block, and fences late responses after stop or restart. Playback
+the next block, and fences late responses after stop or restart. While a
+turn is live (the chat's busy state) it reads only finished transcript
+blocks — one is finished once another follows it, or the turn ends — and
+waits instead of stopping when it catches up. "Autoplay replies" arms on
+each turn the learner starts (sends and dock answers, inside the gesture
+that unlocks the audio) and reads the reply from its first finished block
+past the learner's own rows (`data-listen-yours`), unless something is
+already reading or dictation is live. An autoplayed read passes over the
+research and PDF briefs (`data-listen-aside`) even when they're open, as
+does every read except one started inside that brief. Playback
 speed is stored in browser localStorage. `listen.tsx` supplies one shared
 speaker, the current block highlight, and a player above the dock. Mouse
 input reveals the speaker on hover; touch input reveals it on a tap.

@@ -3,7 +3,8 @@
 /**
  * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
  * session's listen affordances read through. Listening is opt-in, and so
- * is reading on from the transcript into the dock's question. OpenAI
+ * is reading on from the transcript into the dock's question, and
+ * autoplaying replies. OpenAI
  * with your OpenAI key by default; Advanced switches to a custom
  * OpenAI-compatible endpoint (audio-endpoint.tsx).
  */
@@ -123,6 +124,13 @@ export function SpeechSection({
 					checked={speech?.readQuestion ?? false}
 					onChange={(readQuestion) => onSectionChange({ ...speech, readQuestion })}
 					label="Read the question"
+				/>
+			</SettingsRow>
+			<SettingsRow label="Autoplay replies" hint="Read the agent's reply aloud as it arrives, for turns you start" testid="speech-row-autoplay">
+				<Toggle
+					checked={speech?.autoplay ?? false}
+					onChange={(autoplay) => onSectionChange({ ...speech, autoplay })}
+					label="Autoplay replies"
 				/>
 			</SettingsRow>
 			<SettingsRow

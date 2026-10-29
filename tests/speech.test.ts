@@ -86,11 +86,11 @@ describe("the speech settings section", () => {
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { baseUrl: "file:///etc" } })?.speech, {});
 	});
 	it("resolves to OpenAI with its key unless the custom endpoint is on", () => {
-		const openai = { enabled: undefined, voice: "alloy", readQuestion: false, custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", keyId: "OPENAI_API_KEY" };
+		const openai = { enabled: undefined, voice: "alloy", readQuestion: false, autoplay: false, custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", keyId: "OPENAI_API_KEY" };
 		assert.deepEqual(resolveSettings(null).speech, openai);
 		assert.deepEqual(resolveSettings({ version: 1, speech: { baseUrl: "http://local.test/v1", model: "x" } }).speech, openai, "saved endpoint unused while off");
 		assert.deepEqual(resolveSettings({ version: 1, speech: { customEndpoint: true, baseUrl: "http://local.test/v1" } }).speech,
-			{ enabled: undefined, voice: "alloy", readQuestion: false, custom: true, baseUrl: "http://local.test/v1", model: "gpt-4o-mini-tts", keyId: "TTS_API_KEY" });
+			{ enabled: undefined, voice: "alloy", readQuestion: false, autoplay: false, custom: true, baseUrl: "http://local.test/v1", model: "gpt-4o-mini-tts", keyId: "TTS_API_KEY" });
 		assert.equal(resolveSettings({ version: 1, speech: { voice: "geffenv1" } }).speech.voice, "geffenv1");
 	});
 	it("PUT parser: rejects bad URLs and ids with a rationale; empty strings clear", () => {
@@ -109,6 +109,13 @@ describe("the speech settings section", () => {
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { readQuestion: "yes" } })?.speech, {});
 		assert.deepEqual(parseSpeechSettingsBody({ readQuestion: true }), { ok: true, settings: { readQuestion: true } });
 		assert.equal(parseSpeechSettingsBody({ readQuestion: 1 }).ok, false);
+	});
+	it("Autoplay replies: off unless saved; booleans only", () => {
+		assert.equal(resolveSettings(null).speech.autoplay, false);
+		assert.equal(resolveSettings({ version: 1, speech: { autoplay: true } }).speech.autoplay, true);
+		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { autoplay: "yes" } })?.speech, {});
+		assert.deepEqual(parseSpeechSettingsBody({ autoplay: true }), { ok: true, settings: { autoplay: true } });
+		assert.equal(parseSpeechSettingsBody({ autoplay: 1 }).ok, false);
 	});
 	it("preserves explicit activation and rejects invalid activation or URL secrets", () => {
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { enabled: false } })?.speech, { enabled: false });
@@ -152,7 +159,7 @@ describe("GET/POST /api/tts/openai against an OpenAI-compatible server", () => {
 		process.env.TTS_API_KEY = "sfy-local-throwaway-test-key";
 		writeSettings({ version: 1, speech: { customEndpoint: true, baseUrl: "http://speech.test/v1/", model: "tts-1", voice: "alloy" } });
 		const res = await tts.GET();
-		assert.deepEqual(await res.json(), { configured: false, keyPresent: true, custom: true, baseUrl: "http://speech.test/v1", model: "tts-1", voice: "alloy", readQuestion: false });
+		assert.deepEqual(await res.json(), { configured: false, keyPresent: true, custom: true, baseUrl: "http://speech.test/v1", model: "tts-1", voice: "alloy", readQuestion: false, autoplay: false });
 		const refused = await post({ parts: [{ text: "Hello" }] });
 		assert.equal(refused.status, 503);
 		assert.match(((await refused.json()) as { message: string }).message, /Settings → TTS/);

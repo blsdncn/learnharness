@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
+import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
  *  language for every surface where the learner's own thinking renders —
@@ -107,6 +108,7 @@ export function ThinkingBlock({
 		   11px rung). */
 		<div
 			data-testid={testId}
+			{...{ [LISTEN_YOURS_ATTR]: "" }}
 			data-commit={dataCommit === undefined ? undefined : dataCommit ? "true" : "false"}
 			className={cn(
 				// Round five (owner, 2026-10-07): total inset still 3ch (the

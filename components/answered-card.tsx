@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
 import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -66,6 +67,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 		<div
 			className="group/card rounded-xl border bg-card p-4 text-card-foreground [&>*:last-child]:mb-0"
 			data-testid="answered-card"
+			{...{ [LISTEN_YOURS_ATTR]: "" }}
 		>
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{/* The tool's OWN name first (owner 2026-10-09): probe-phase

@@ -9,17 +9,42 @@
  *   read-from-here, the Speechify model) — the next block is found in the
  *   live DOM at each advance, so blocks that streamed in meanwhile count.
  *   With readQuestion on, a read from the transcript continues into the
- *   dock (speech-dom adjacentAcross);
+ *   dock (speech-dom adjacentAcross). FOLLOW MODE while a turn is live
+ *   (setLive): only finished transcript blocks are read — one is finished
+ *   once a block follows it, or the turn ends — and reading that catches
+ *   up waits ("waiting") instead of stopping — as does starting on a block
+ *   still being written, until it's finished;
  * - "list": exactly these blocks (Compare: your answer, then the correct
  *   answer).
+ *
+ * AUTOPLAY (Settings → TTS): armAutoplay, called in the gesture that
+ * starts a turn, unlocks the audio and marks the transcript; the reply's
+ * first finished block that isn't the learner's own row starts a "from"
+ * read — unless something is already reading or dictation is live.
+ * Every "from" read passes over briefs (LISTEN_ASIDE_ATTR) except the one
+ * it started in.
  *
  * Each block is one POST /api/tts/openai; the next block's audio is fetched while
  * the current one plays, so only the first block waits.
  */
 
-import { LISTEN_BLOCK_ATTR, LISTEN_ENTER_DOCK_EVENT, adjacentAcross, adjacentBlock, blockLabel, dockRoot, dockSection, rootOf, speechParts } from "./speech-dom";
+import { isDictationActive } from "@/components/dictation-state";
+import {
+	LISTEN_ASIDE_ATTR,
+	LISTEN_ENTER_DOCK_EVENT,
+	LISTEN_ROOT_ATTR,
+	LISTEN_YOURS_ATTR,
+	adjacentAcross,
+	adjacentBlock,
+	blockLabel,
+	blocksIn,
+	dockRoot,
+	rootOf,
+	speechParts,
+} from "./speech-dom";
 
-export type ListenStatus = "idle" | "loading" | "playing" | "paused" | "error";
+/** "waiting": follow mode caught up with a live turn. */
+export type ListenStatus = "idle" | "loading" | "playing" | "paused" | "waiting" | "error";
 
 export interface ListenSnapshot {
 	status: ListenStatus;
@@ -36,7 +61,26 @@ export interface ListenSnapshot {
 export const LISTEN_RATES = [0.8, 1, 1.2, 1.4, 1.6, 1.8, 2] as const;
 const RATE_KEY = "lh:listen-rate";
 
-type Queue = { kind: "from"; root: Element } | { kind: "list"; blocks: Element[] };
+/** `aside`: the brief the read started in, the only one it reads (see
+ *  LISTEN_ASIDE_ATTR); every other is passed over. */
+type Queue = { kind: "from"; root: Element; aside: Element | null } | { kind: "list"; blocks: Element[] };
+
+const asideOf = (block: Element) => block.closest(`[${LISTEN_ASIDE_ATTR}]`);
+
+/** Where a block sat, to find it again after a re-render replaced it. */
+interface Anchor {
+	root: string | null;
+	index: number;
+	text: string;
+}
+
+/** After the turn ends, how long the dock gets to show its question. */
+const SETTLE_MS = 600;
+/** An armed autoplay whose turn never started goes stale. */
+const ARM_TTL_MS = 60_000;
+
+const textOf = (el: Element) => (el.textContent ?? "").trim();
+const transcriptRoot = () => document.querySelector(`[${LISTEN_ROOT_ATTR}="transcript"]`);
 
 /** A few milliseconds of silence: played inside the click that starts
  *  listening, so the element is unlocked for autoplay-restricted browsers
@@ -71,8 +115,21 @@ export class ListenController {
 	private clips = new Map<Element, { abort: AbortController; url: Promise<string> }>();
 	/** "Read the question" (Settings → TTS), kept current by the provider. */
 	readQuestion = false;
-	/** The block being read is a dock section (see activeBlock). */
+	/** "Autoplay replies" (Settings → TTS), kept current by the provider. */
+	autoplay = false;
+	/** A turn is generating (follow mode), kept current by the chat. */
+	private live = false;
+	private settleTimer: ReturnType<typeof setTimeout> | undefined;
+	/** The block being read is in the dock (the crossing event). */
 	private inDock = false;
+	private anchor: Anchor | null = null;
+	/** Read from here on a block still being written: read it once it's
+	 *  finished (found again by its root and index — its text is growing). */
+	private waitFor: { block: Element; root: string | null; index: number } | null = null;
+	/** Autoplay waiting for its reply: blocks past `mark` are the reply's. */
+	private armed: { mark: number; sawLive: boolean; at: number } | null = null;
+	private observer: MutationObserver | null = null;
+	private pokeQueued = false;
 
 	constructor() {
 		const stored = typeof localStorage === "undefined" ? null : Number(localStorage.getItem(RATE_KEY));
@@ -91,14 +148,13 @@ export class ListenController {
 		for (const l of this.listeners) l();
 	}
 
-	/** The block being read, live. A dock section that re-rendered (the
-	 *  folded practice bar's hidden Problem swapped for the open dock's) is
-	 *  found again by its label, so the highlight follows the dock opening. */
+	/** The block being read, live. A block a re-render replaced (the turn's
+	 *  settle re-keying the reply; the folded practice bar's hidden Problem
+	 *  swapped for the open dock's) is found again by position and text. */
 	activeBlock(): Element | null {
 		const block = this.snapshot.block;
 		if (!block || block.isConnected) return block;
-		if (!this.inDock) return null;
-		const again = this.sameSection(block);
+		const again = this.refind();
 		if (again) this.set({ block: again });
 		return again;
 	}
@@ -113,7 +169,7 @@ export class ListenController {
 	playFrom(block: Element) {
 		const root = rootOf(block);
 		if (!root) return;
-		this.start({ kind: "from", root }, block);
+		this.start({ kind: "from", root, aside: asideOf(block) }, block);
 	}
 
 	/** Read exactly these blocks, in order. Call from the click. */
@@ -131,6 +187,9 @@ export class ListenController {
 			this.audio.removeAttribute("src");
 		}
 		this.inDock = false;
+		this.anchor = null;
+		this.waitFor = null;
+		if (!this.armed) this.unwatch();
 		this.set({ status: "idle", block: null, label: "", position: null, error: null });
 	}
 
@@ -148,7 +207,8 @@ export class ListenController {
 
 	next() {
 		const next = this.neighbor(1);
-		if (next) this.goTo(next);
+		if (next && this.ready(next)) this.goTo(next);
+		else if (this.following()) this.wait();
 	}
 
 	prev() {
@@ -162,6 +222,38 @@ export class ListenController {
 		this.set({ rate });
 	}
 
+	/** Is a turn generating? The chat calls this as its status changes. */
+	setLive(live: boolean) {
+		if (live === this.live) return;
+		this.live = live;
+		clearTimeout(this.settleTimer);
+		if (live) {
+			if (this.armed) this.armed.sawLive = true;
+			return;
+		}
+		// The turn ended: its last block is finished now. Give the dock a
+		// moment to show the question before a caught-up read gives up.
+		this.poke();
+		this.settleTimer = setTimeout(() => this.poke(true), SETTLE_MS);
+	}
+
+	/** Call from the gesture that starts a turn (a send, an answer). With
+	 *  autoplay on, the reply that follows is read as it arrives. */
+	armAutoplay() {
+		if (!this.autoplay) return;
+		const transcript = transcriptRoot();
+		if (!transcript) return;
+		if (!this.busy()) this.unlock();
+		this.armed = { mark: blocksIn(transcript).length, sawLive: this.live, at: Date.now() };
+		this.watch();
+	}
+
+	/** The turn armAutoplay expected didn't start (a refused send). */
+	disarmAutoplay() {
+		this.armed = null;
+		if (this.snapshot.status !== "waiting") this.unwatch();
+	}
+
 	// ── internals ───────────────────────────────────────────────────────────
 	private ensureAudio(): HTMLAudioElement {
 		if (!this.audio) {
@@ -170,21 +262,124 @@ export class ListenController {
 			this.audio.addEventListener("ended", () => {
 				if (this.snapshot.status !== "playing") return;
 				const next = this.neighbor(1);
-				if (next) this.goTo(next);
+				if (next && this.ready(next)) this.goTo(next);
+				else if (this.following()) this.wait();
 				else this.stop();
 			});
 		}
 		return this.audio;
 	}
 
-	private start(queue: Queue, first: Element) {
+	/** Play silence on the element — inside a gesture, this unlocks it for
+	 *  autoplay-restricted browsers (iOS) before the real clip arrives. */
+	private unlock() {
 		const a = this.ensureAudio();
-		// Unlock inside the gesture (see silentWav).
 		this.silence ??= silentWav();
 		a.src = this.silence;
 		void a.play().catch(() => {});
+	}
+
+	private start(queue: Queue, first: Element) {
+		this.unlock();
 		this.dropClips();
 		this.queue = queue;
+		if (queue.kind === "from" && !this.ready(first)) {
+			const root = rootOf(first);
+			this.waitFor = { block: first, root: root?.getAttribute(LISTEN_ROOT_ATTR) ?? null, index: root ? blocksIn(root).indexOf(first) : -1 };
+			this.set({ block: null });
+			this.wait();
+			return;
+		}
+		this.goTo(first, true);
+	}
+
+	private busy(): boolean {
+		const s = this.snapshot.status;
+		return s === "loading" || s === "playing" || s === "paused" || s === "waiting";
+	}
+
+	/** Reading through a root while a turn is live: catching up waits. */
+	private following(): boolean {
+		return this.live && this.queue?.kind === "from";
+	}
+
+	/** Follow mode: a transcript block is finished once another follows it
+	 *  (markdown streams in order) or the turn has ended. */
+	private ready(block: Element): boolean {
+		if (!this.live) return true;
+		const root = rootOf(block);
+		if (root?.getAttribute(LISTEN_ROOT_ATTR) !== "transcript") return true;
+		return adjacentBlock(block, root, 1) !== null;
+	}
+
+	private wait() {
+		this.session++;
+		this.audio?.pause();
+		this.set({ status: "waiting", label: "Waiting…", position: null, error: null });
+		this.watch();
+	}
+
+	/** Watch the page while waiting or armed: new blocks may be ready. */
+	private watch() {
+		if (this.observer || typeof MutationObserver === "undefined") return;
+		this.observer = new MutationObserver(() => {
+			if (this.pokeQueued) return;
+			this.pokeQueued = true;
+			setTimeout(() => {
+				this.pokeQueued = false;
+				this.poke();
+			}, 50);
+		});
+		this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+	}
+
+	private unwatch() {
+		this.observer?.disconnect();
+		this.observer = null;
+	}
+
+	/** Re-check a caught-up read and an armed autoplay. `settled`: the turn
+	 *  ended a moment ago — whatever isn't here now isn't coming. */
+	private poke(settled = false) {
+		if (this.snapshot.status === "waiting") {
+			const pending = this.waitFor;
+			const next = pending ? this.waitedFor(pending) : this.neighbor(1);
+			if (next && this.ready(next)) this.goTo(next, pending !== null);
+			else if (settled && !this.live) this.stop();
+		}
+		this.tryAutoplay(settled);
+		if (this.snapshot.status !== "waiting" && !this.armed) this.unwatch();
+	}
+
+	private tryAutoplay(settled: boolean) {
+		const armed = this.armed;
+		if (!armed) return;
+		if (!this.autoplay || (!armed.sawLive && Date.now() - armed.at > ARM_TTL_MS)) {
+			this.armed = null;
+			return;
+		}
+		const transcript = transcriptRoot();
+		const reply = transcript
+			? blocksIn(transcript).slice(armed.mark).find((b) => !b.closest(`[${LISTEN_YOURS_ATTR}], [${LISTEN_ASIDE_ATTR}]`))
+			: undefined;
+		let first: Element | null = reply && this.ready(reply) ? reply : null;
+		const over = settled && armed.sawLive && !this.live;
+		// A reply that is only a question: read the question.
+		if (!first && over && this.readQuestion) {
+			const dock = dockRoot(document);
+			first = dock ? (blocksIn(dock)[0] ?? null) : null;
+		}
+		if (!first) {
+			if (over) this.armed = null;
+			return;
+		}
+		this.armed = null;
+		// Never interrupt: something reading, or dictation, skips this reply.
+		if (this.busy() || isDictationActive()) return;
+		const root = rootOf(first);
+		if (!root) return;
+		this.dropClips();
+		this.queue = { kind: "from", root, aside: null };
 		this.goTo(first, true);
 	}
 
@@ -193,13 +388,27 @@ export class ListenController {
 		const at = this.activeBlock() ?? this.snapshot.block;
 		if (!q || !at) return null;
 		if (q.kind === "list") return q.blocks[q.blocks.indexOf(at) + dir] ?? null;
-		return this.readQuestion ? adjacentAcross(at, q.root, dir) : adjacentBlock(at, q.root, dir);
+		const step = (b: Element) => (this.readQuestion ? adjacentAcross(b, q.root, dir) : adjacentBlock(b, q.root, dir));
+		let next = step(at);
+		while (next && asideOf(next) && asideOf(next) !== q.aside) next = step(next);
+		return next;
 	}
 
-	/** The open dock's copy of a dock section that re-rendered away. */
-	private sameSection(block: Element): Element | null {
-		const label = block.getAttribute(LISTEN_BLOCK_ATTR);
-		return label ? dockSection(document, label) : null;
+	private waitedFor(pending: NonNullable<ListenController["waitFor"]>): Element | null {
+		if (pending.block.isConnected) return pending.block;
+		const root = document.querySelector(`[${LISTEN_ROOT_ATTR}="${pending.root}"]`);
+		return root ? (blocksIn(root)[pending.index] ?? null) : null;
+	}
+
+	private refind(): Element | null {
+		const anchor = this.anchor;
+		if (!anchor) return null;
+		const root = document.querySelector(`[${LISTEN_ROOT_ATTR}="${anchor.root}"]`);
+		if (!root) return null;
+		const blocks = blocksIn(root);
+		const same = blocks[anchor.index];
+		if (same && textOf(same) === anchor.text) return same;
+		return blocks.find((b) => textOf(b) === anchor.text) ?? null;
 	}
 
 	private position(block: Element): ListenSnapshot["position"] {
@@ -209,6 +418,9 @@ export class ListenController {
 
 	/** `first`: the queue's first block — nothing was read before it. */
 	private goTo(block: Element, first = false) {
+		this.waitFor = null;
+		const root = rootOf(block);
+		this.anchor = { root: root?.getAttribute(LISTEN_ROOT_ATTR) ?? null, index: root ? blocksIn(root).indexOf(block) : -1, text: textOf(block) };
 		const wasInDock = this.inDock;
 		this.inDock = dockRoot(document)?.contains(block) ?? false;
 		if (this.inDock && !wasInDock && !first) {
@@ -216,6 +428,7 @@ export class ListenController {
 			// follows a section the opening re-renders).
 			document.dispatchEvent(new Event(LISTEN_ENTER_DOCK_EVENT));
 		}
+		if (!this.armed) this.unwatch();
 		const session = ++this.session;
 		const a = this.ensureAudio();
 		a.pause();
@@ -231,7 +444,7 @@ export class ListenController {
 				if (session !== this.session) return;
 				this.set({ status: "playing" });
 				const next = this.neighbor(1);
-				if (next) {
+				if (next && this.ready(next)) {
 					keep.add(next);
 					void this.clip(next).catch(() => {}); // prefetch; a failure resurfaces when reached
 				}

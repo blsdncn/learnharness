@@ -82,7 +82,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
-import { LISTEN_ENTER_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR } from "@/components/listen/speech-dom";
+import { LISTEN_ENTER_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -254,7 +254,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send: sessionSend, continueIfOwed, steer, steerQueue, submitAnswer: sessionSubmitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -380,6 +380,26 @@ export function Chat({
 	listeningRef.current = listening;
 	const listenRef = useRef(listen);
 	listenRef.current = listen;
+	// AUTOPLAY (Settings → TTS): every turn the learner starts here — a
+	// send, an answer — arms reading its reply, inside the gesture (the
+	// audio unlock needs one). A refused send disarms.
+	const send = useCallback(
+		(input: ChatInput, onAccepted?: () => void) => {
+			listenRef.current.controller?.armAutoplay();
+			return sessionSend(input, onAccepted).then((accepted) => {
+				if (!accepted) listenRef.current.controller?.disarmAutoplay();
+				return accepted;
+			});
+		},
+		[sessionSend],
+	);
+	const submitAnswer = useCallback(
+		(...args: Parameters<typeof sessionSubmitAnswer>) => {
+			listenRef.current.controller?.armAutoplay();
+			sessionSubmitAnswer(...args);
+		},
+		[sessionSubmitAnswer],
+	);
 	useEffect(() => {
 		const onAbort = () => {
 			const target = escAbortTarget({
@@ -474,6 +494,10 @@ export function Chat({
 	const busy = localStream || turnInFlight;
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
+	// Listening's follow mode reads only finished blocks while a turn runs.
+	useEffect(() => {
+		listen.controller?.setLive(busy);
+	}, [busy, listen.controller]);
 	// The attach handoff (stream-reattach wave): the moment a resumed
 	// stream takes over the rendering — the SDK left "ready", so
 	// submitted/streaming means chunks are flowing — localStream covers
@@ -1505,6 +1529,7 @@ export function Chat({
 										    Rendered WITHOUT the Message wrapper — that is the bubble. */
 											<div
 										data-testid="user-message"
+										{...{ [LISTEN_YOURS_ATTR]: "" }}
 										/* THE DOCUMENT, ALL-IN (owner rounds two+three, 2026-10-07):
 										    no chat side — the user message is a full-width card-color
 										    BAND, the IDENTICAL geometry as the thinking rows: 5px band

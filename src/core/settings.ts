@@ -374,6 +374,8 @@ export interface SpeechSettings extends AudioEndpointSettings {
 	/** Read from here continues from the transcript into the dock's open
 	 *  question or practice problem. Unset = off. */
 	readQuestion?: boolean;
+	/** Read the reply to a turn you start as it arrives. Unset = off. */
+	autoplay?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -673,6 +675,8 @@ function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
 	if (voice) out.voice = voice;
 	const readQuestion = boolOrDrop(raw.readQuestion);
 	if (readQuestion !== undefined) out.readQuestion = readQuestion;
+	const autoplay = boolOrDrop(raw.autoplay);
+	if (autoplay !== undefined) out.autoplay = autoplay;
 	return { ...out, ...sanitizeAudioEndpoint(raw) };
 }
 
