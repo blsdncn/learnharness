@@ -23,7 +23,7 @@
  * effect immediately. Plaintext never returns from the store.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	AUTH_KEYS,
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
@@ -400,9 +400,9 @@ export function KeysSection({
 	audio,
 }: {
 	initialRow?: string;
-	/** Providers → TTS: each feature's provider choice and
-	 *  custom-endpoint model, owned by the dialog (which owns the record). */
-	audio?: { tts: AudioChoice<"openai" | "custom"> };
+	/** Providers → TTS: the provider choice and custom-endpoint model,
+	 *  owned by the dialog (which owns the record). */
+	audio?: { tts: TtsChoice };
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
@@ -425,9 +425,9 @@ export function KeysSection({
 		if (openRow === null && adding === null && !addingCustom) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
-			// A language dropdown above this editor in the dismissal stack owns
+			// A language or TTS model menu above this editor owns
 			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
+			if (document.querySelector('[data-testid="dictation-language-menu"], [data-testid="tts-custom-model-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -467,21 +467,6 @@ export function KeysSection({
 	useEffect(() => {
 		if (initialRow !== undefined) setOpenRow(initialRow);
 	}, [initialRow]);
-
-	// A deep link to a provider key that isn't saved yet opens its Add paste field instead
-	// — once per link, after the catalog loads.
-	const seededAdd = useRef<string | null>(null);
-	useEffect(() => {
-		if (initialRow === undefined || statuses === null || providers === undefined) return;
-		if (seededAdd.current === initialRow) return;
-		seededAdd.current = initialRow;
-		if (statuses.some((s) => s.id === initialRow)) return;
-		const provider = providers.find((p) => p.envVar === initialRow);
-		if (!provider) return;
-		setOpenRow(null);
-		setAdding(provider);
-		setAddError(null);
-	}, [initialRow, statuses, providers]);
 
 	async function saveKey(id: string, value: string): Promise<string | null> {
 		const res = await fetch(`/api/keys/${id}`, {
@@ -675,51 +660,35 @@ export function KeysSection({
 				</>}
 			</SettingsGroup>)}
 			{audio && <SettingsGroup label="TTS" testid="group-tts">
-				<AudioProviders
-					endpoint={TTS_ENDPOINT_UI}
-					feature="TTS"
-					options={[{ value: "openai", label: "OpenAI" }]}
-					hint={(provider) => provider === "custom" ? "Reads through your custom endpoint" : "Reads with your OpenAI key"}
-					choice={audio.tts}
-					openaiKey={openaiKey}
-					onOpenOpenAIKey={openOpenAIKey}
-				/>
+				<TtsProviders choice={audio.tts} openaiKey={openaiKey} onOpenOpenAIKey={openOpenAIKey} />
 			</SettingsGroup>}
 
 		</>
 	);
 }
 
-/** One audio feature's provider choice and its stored custom-endpoint model. */
-export interface AudioChoice<P extends string> {
-	provider: P;
-	onProvider: (provider: P) => void;
+/** TTS's provider choice and its stored custom-endpoint model. */
+export interface TtsChoice {
+	provider: "openai" | "custom";
+	onProvider: (provider: "openai" | "custom") => void;
 	customModel: string | undefined;
 	onCustomModel: (model: string) => void;
 }
 
 /**
- * Providers → TTS: the Provider dropdown, the chosen provider's
- * key row, the feature's own custom endpoint (upstream's connect form at its
- * own route — row when connected, "+ Add a provider" while not), and the
- * custom endpoint's model. "Custom endpoint" joins the dropdown once one is
- * added; a disconnected endpoint stays selectable so the choice never
- * silently falls back.
+ * Providers → TTS: the Provider dropdown, OpenAI's key row, TTS's own
+ * custom endpoint (upstream's connect form at its own route — row when
+ * connected, "+ Add a provider" while not), and the custom endpoint's
+ * model. "Custom endpoint" joins the dropdown once one is added; a
+ * disconnected endpoint stays selectable so the choice never silently
+ * falls back.
  */
-function AudioProviders<P extends string>({
-	endpoint, feature, options, hint, choice, openaiKey, onOpenOpenAIKey, before, after,
-}: {
-	endpoint: CustomEndpointUi;
-	feature: "TTS";
-	/** The built-in providers; "custom" is appended by the endpoint. */
-	options: { value: P; label: string }[];
-	hint: (provider: P) => ReactNode;
-	choice: AudioChoice<P>;
+function TtsProviders({ choice, openaiKey, onOpenOpenAIKey }: {
+	choice: TtsChoice;
 	openaiKey: AuthKeyStatus | undefined;
 	onOpenOpenAIKey: () => void;
-	before?: ReactNode;
-	after?: ReactNode;
 }) {
+	const endpoint = TTS_ENDPOINT_UI;
 	const prefix = "tts";
 	const [status, setStatus] = useState<CustomStatus | null>(null);
 	const [editing, setEditing] = useState(false);
@@ -734,6 +703,7 @@ function AudioProviders<P extends string>({
 		if (!editing) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
+			if (document.querySelector('[data-testid="tts-custom-model-menu"], [data-testid="dictation-language-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setEditing(false);
@@ -753,16 +723,15 @@ function AudioProviders<P extends string>({
 
 	const connected = Boolean(status?.baseUrl);
 	const custom = choice.provider === "custom";
-	const all = [...options, ...(connected || custom ? [{ value: "custom" as P, label: "Custom endpoint" }] : [])];
+	const all = [{ value: "openai", label: "OpenAI" }, ...(connected || custom ? [{ value: "custom", label: "Custom endpoint" }] : [])];
 	return <>
-		<SettingsRow label="Provider" hint={hint(choice.provider)} testid={`${prefix}-row-provider`}>
-			<select aria-label={`${feature} provider`} data-testid={`${prefix}-provider`} value={choice.provider}
-				onChange={(event) => choice.onProvider(event.target.value as P)}
+		<SettingsRow label="Provider" hint={custom ? "Reads through your custom endpoint" : "Reads with your OpenAI key"} testid={`${prefix}-row-provider`}>
+			<select aria-label="TTS provider" data-testid={`${prefix}-provider`} value={choice.provider}
+				onChange={(event) => choice.onProvider(event.target.value as TtsChoice["provider"])}
 				className="h-7 w-40 rounded-sm border border-border bg-background px-1.5 font-ui text-xs">
 				{all.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
 			</select>
 		</SettingsRow>
-		{before}
 		{choice.provider === "openai" && (
 			<button
 				type="button"
@@ -809,7 +778,7 @@ function AudioProviders<P extends string>({
 				value={choice.customModel}
 				onPick={choice.onCustomModel}
 				testid={`${prefix}-custom-model`}
-				ariaLabel={`${feature} model`}
+				ariaLabel="TTS model"
 				hint={!connected
 					? <span className="text-destructive">Add a custom endpoint first</span>
 					: choice.customModel === undefined
@@ -817,7 +786,6 @@ function AudioProviders<P extends string>({
 						: "From the endpoint's model list"}
 			/>
 		)}
-		{after}
 	</>;
 }
 

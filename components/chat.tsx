@@ -85,7 +85,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
-import { LISTEN_ENTER_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
+import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -410,7 +410,7 @@ export function Chat({
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
-				listening: listeningRef.current,
+				listening: listeningRef.current || listenRef.current.controller?.pendingAutoplay === true,
 				pending: pendingRef.current !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
@@ -2246,20 +2246,6 @@ function DockOverlay({
 	};
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
-	// READ THE QUESTION (Settings → TTS): reading crossed from the
-	// transcript into a folded dock. At the bottom, open it the way the bar
-	// does (dictation finishes first); scrolled up, it stays folded and is
-	// read hidden — never a forced scroll.
-	useEffect(() => {
-		const onEnterDock = () => {
-			if (expandedRef.current || !atBottomRef.current) return;
-			void finishDictation().then(() => {
-				expandAndRevealRef.current();
-			});
-		};
-		document.addEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
-		return () => document.removeEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
-	}, []);
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
 	// invitation or collapsed by scroll — Enter is never dead. Any live

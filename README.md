@@ -53,8 +53,8 @@ Add your provider API key and choose your models, then start a session with what
 
 To listen to lesson text, enable Listening in **Settings → TTS**. Choose
 OpenAI or add a custom OpenAI-compatible endpoint under **Settings → Providers →
-TTS**. TTS settings control the voice, question reading, and reply autoplay;
-the player controls playback speed. Lesson text is sent to the chosen service
+TTS**. TTS settings control the voice, question reading, reply autoplay, and
+whether autoplay includes model answers; the player controls playback speed. Lesson text is sent to the chosen service
 for synthesis.
 
 All three platforms support in-app updates.

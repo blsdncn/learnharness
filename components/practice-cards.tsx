@@ -65,7 +65,7 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
 			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
-			<div className="lh-prose text-[15px]" data-listen-block="Problem">
+			<div className="lh-prose text-[15px]" data-listen-block="Problem" data-listen-problem={part.toolCallId}>
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
 		</div>
@@ -110,14 +110,14 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	// learner clicked; the record needs only the fact).
 	if (outcome === "dismissed") {
 		return (
-			<div data-testid="conclude-card" className="my-1 px-1 text-sm text-muted-foreground/70">
+			<div data-testid="conclude-card" data-listen-answer-card="" className="my-1 px-1 text-sm text-muted-foreground/70">
 				Problem dismissed.
 			</div>
 		);
 	}
 
 	return (
-		<div data-testid="conclude-card" className="lh-card-enter relative my-1 rounded-xl border bg-card p-4">
+		<div data-testid="conclude-card" data-listen-answer-card="" className="lh-card-enter relative my-1 rounded-xl border bg-card p-4">
 			{/* The heading row (owner round 3, 2026-10-05): plain 'Concluded'
 			    eyebrow + the outcome in the quiz cards' EXACT chip register —
 			    no more two same-weight headings stacked. */}
@@ -143,7 +143,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 					<div className="my-3 border-t" />
 					<div>
 						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
-						<div className="lh-prose text-[15px]" data-listen-block="Model solution">
+						<div className="lh-prose text-[15px]" data-listen-block="Model solution" data-listen-model-answer="">
 							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
 					</div>

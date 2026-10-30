@@ -78,7 +78,7 @@ describe("TTS settings: listening controls, and the provider named with a link t
 	});
 	function Content() {
 		const [speech, setSpeech] = useState(saved);
-		return <SpeechSection speech={speech} onSectionChange={(next) => { saved = next; setSpeech(next); }} onOpenProviders={() => opened++} />;
+		return <SpeechSection speech={speech} onChange={(patch) => { saved = { ...saved, ...patch }; setSpeech(saved); }} onOpenProviders={() => opened++} />;
 	}
 	const button = (id: string) => host.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
 	const input = (id: string) => host.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
@@ -113,6 +113,26 @@ describe("TTS settings: listening controls, and the provider named with a link t
 		assert.equal(button("toggle-autoplay-replies").getAttribute("aria-checked"), "false");
 		await click("toggle-autoplay-replies");
 		assert.deepEqual(saved, { voice: "alloy", autoplay: true });
+	});
+	it("Read model answers defaults off and is disabled and dimmed without autoplay", async () => {
+		await mount();
+		assert.equal(button("toggle-read-model-answers").getAttribute("aria-checked"), "false");
+		assert.equal(button("toggle-read-model-answers").disabled, true);
+		assert.ok(host.querySelector('[data-testid="speech-row-read-model-answers"]')!.classList.contains("opacity-40"));
+		await click("toggle-read-model-answers");
+		assert.deepEqual(saved, { voice: "alloy" });
+		await click("toggle-autoplay-replies");
+		assert.equal(button("toggle-read-model-answers").disabled, false);
+		assert.ok(!host.querySelector('[data-testid="speech-row-read-model-answers"]')!.classList.contains("opacity-40"));
+		await click("toggle-read-model-answers");
+		assert.deepEqual(saved, { voice: "alloy", autoplay: true, readModelAnswers: true });
+		await click("toggle-autoplay-replies");
+		assert.equal(button("toggle-read-model-answers").disabled, true);
+		assert.equal(saved.readModelAnswers, true, "disabling autoplay preserves the preference");
+		await click("toggle-autoplay-replies");
+		assert.equal(button("toggle-read-model-answers").getAttribute("aria-checked"), "true");
+		await click("toggle-read-model-answers");
+		assert.equal(saved.readModelAnswers, false);
 	});
 	it("names OpenAI by default; a missing key shows, and the link opens Providers", async () => {
 		await mount();

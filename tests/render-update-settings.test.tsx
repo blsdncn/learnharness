@@ -216,6 +216,24 @@ describe("Settings integration", () => {
 		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
 	});
 
+	it("General shows only server truth: nothing flips while its save is in flight", async () => {
+		bridge();
+		const record = { version: 1, general: { autoUpdate: true } };
+		const put = deferred<Response>();
+		const puts: unknown[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method !== "PUT") return Response.json({ settings: record });
+			puts.push(JSON.parse(String(init.body)));
+			return put.promise;
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		await click(q(host, "toggle-auto-update"));
+		assert.deepEqual(puts, [{ autoUpdate: false }]);
+		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "true", "no optimistic flip");
+		// The server keeps it on: the stored value shows, not the request.
+		await act(async () => put.resolve(Response.json({ settings: record })));
+		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "true");
+	});
 
 	it("Providers → TTS: OpenAI by default; a custom endpoint joins once added", async () => {
 		bridge();
@@ -294,6 +312,56 @@ describe("Settings integration", () => {
 			assert.match(q(reopened, "speech-provider")!.textContent ?? "", /Custom endpoint/);
 		} finally {
 			first.resolve(Response.json({ settings: record }));
+		}
+	});
+
+	it("quick TTS edits on both pages never overwrite each other, through a close and reopen", async () => {
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, autoplay: true, readModelAnswers: false } };
+		const first = deferred<void>();
+		const puts: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [], providers: [] });
+			if (url === "/api/tts/openai") return Response.json({ configured: true, keyPresent: true, custom: false });
+			if (url.includes("custom")) return Response.json({ baseUrl: "http://speech.test/v1", models: [{ id: "kokoro" }] }, { headers: { etag: '"1"' } });
+			if (init?.method === "PUT") {
+				assert.equal(url, "/api/settings/speech");
+				const body = JSON.parse(String(init.body));
+				puts.push(body);
+				const respond = () => { record = { ...record, speech: body }; return Response.json({ settings: record }); };
+				return puts.length === 1 ? first.promise.then(respond) : respond();
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+		try {
+			await click(q(host, "toggle-read-model-answers"));
+			await click(q(host, "toggle-autoplay-replies"));
+			assert.equal(q(host, "toggle-read-model-answers")!.getAttribute("aria-checked"), "true", "pending edits show at once");
+			assert.equal((q(host, "toggle-read-model-answers") as HTMLButtonElement).disabled, true);
+			await click(q(host, "settings-nav-keys"));
+			const select = q(host, "tts-provider") as HTMLSelectElement;
+			await act(async () => {
+				Object.defineProperty(select, "value", { configurable: true, value: "custom" });
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			assert.equal(puts.length, 1, "later edits wait for the first save");
+			const mounted = roots.find((entry) => entry.host === host)!;
+			await act(async () => mounted.root.unmount());
+			roots.splice(roots.indexOf(mounted), 1);
+			host.remove();
+			await act(async () => first.resolve());
+			const reopened = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+			assert.deepEqual(puts, [
+				{ enabled: true, autoplay: true, readModelAnswers: true },
+				{ enabled: true, autoplay: false, readModelAnswers: true },
+				{ enabled: true, autoplay: false, readModelAnswers: true, provider: "custom" },
+			]);
+			assert.equal(q(reopened, "toggle-autoplay-replies")!.getAttribute("aria-checked"), "false");
+			assert.equal(q(reopened, "toggle-read-model-answers")!.getAttribute("aria-checked"), "true", "kept while greyed out");
+			assert.match(q(reopened, "speech-provider")!.textContent ?? "", /Custom endpoint/);
+		} finally {
+			first.resolve();
 		}
 	});
 

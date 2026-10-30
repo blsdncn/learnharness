@@ -32,15 +32,22 @@ import type { SpeechPart } from "@/src/core";
 export const LISTEN_ROOT_ATTR = "data-listen-root";
 export const LISTEN_BLOCK_ATTR = "data-listen-block";
 export const LISTEN_SKIP_ATTR = "data-listen-skip";
-/** Read only by a read started inside it, even open (the research and
- *  PDF briefs); reads from elsewhere, autoplay included, pass over it. */
+/** Automatic advancement skips research/PDF briefs unless the read started
+ *  inside one. The player's Previous/Next can select their open blocks. */
 export const LISTEN_ASIDE_ATTR = "data-listen-aside";
-/** The learner's own rows (your message, answer card, thinking): never
- *  where an autoplayed reply starts. */
+/** The learner's own rows (your message, answer card, thinking): autoplay
+ * reads on past them, except for an opted-in model answer inside a card. */
 export const LISTEN_YOURS_ATTR = "data-listen-yours";
-/** Fired on the document as reading crosses from the transcript into the
- *  dock: the chat opens a folded dock when no scroll is needed. */
-export const LISTEN_ENTER_DOCK_EVENT = "lh:listen-enter-dock";
+/** Committed answers and practice solutions: optionally included in
+ * autoplay, always available to explicit reading. */
+export const LISTEN_MODEL_ANSWER_ATTR = "data-listen-model-answer";
+/** Answer records contribute only their marked model-answer text to autoplay. */
+export const LISTEN_ANSWER_CARD_ATTR = "data-listen-answer-card";
+/** Omitted from autoplay, but still available to explicit reading. */
+export const LISTEN_AUTOPLAY_SKIP_ATTR = "data-listen-autoplay-skip";
+/** A practice statement's tool call id, on its transcript card and its
+ *  dock copy alike. */
+export const LISTEN_PROBLEM_ATTR = "data-listen-problem";
 
 const PROSE = "p, li, h1, h2, h3, h4, h5, h6, blockquote, .katex-display";
 /** Prose that makes its container a non-leaf (display math does not: a
@@ -118,6 +125,17 @@ export function adjacentAcross(block: Element, start: Element, dir: 1 | -1): Ele
 	}
 	if (dir === -1 && root !== start && start.isConnected) return blocksIn(start).at(-1) ?? null;
 	return null;
+}
+
+/** Is `block` the transcript card of the problem the dock holds? Matched
+ * by tool call, so an older problem with the same text is not. Autoplay
+ * with Read the question on reads only the dock copy; a read the learner
+ * starts reads both. */
+export function isDockedProblem(block: Element): boolean {
+	const id = block.getAttribute(LISTEN_PROBLEM_ATTR);
+	if (!id || rootOf(block)?.getAttribute(LISTEN_ROOT_ATTR) !== "transcript") return false;
+	const dock = dockRoot(block.ownerDocument);
+	return dock !== null && blocksIn(dock).some((b) => b.getAttribute(LISTEN_PROBLEM_ATTR) === id);
 }
 
 export function dockRoot(doc: Document): Element | null {

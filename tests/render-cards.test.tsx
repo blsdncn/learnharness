@@ -552,6 +552,7 @@ describe("AnsweredCard: the explain variant", () => {
 		const html = renderToStaticMarkup(<AnsweredCard answer={buildAnswer(explainQD(), { text: "Something about relativity?" })} />);
 		assert.match(html, /Explain/, "labeled as the explain kind");
 		assert.match(html, /The answer:/);
+		assert.match(html, /data-listen-block="The answer" data-listen-model-answer=""/);
 		assert.match(html, /luminiferous aether/);
 		assert.match(html, /fringe shift/);
 		assert.ok(!html.includes("Why:"), "no separate explanation field — one committed answer (owner 2026-09-27)");

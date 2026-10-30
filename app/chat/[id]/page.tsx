@@ -23,7 +23,7 @@ export default async function ChatPage({
 	// Listening (listen wave, 2026-10-26) is per session: a new chat id
 	// remounts the provider, which stops anything still reading.
 	return (
-		<ListenProvider key={chat.id}>
+		<ListenProvider key={chat.id} initialSpeech={record?.speech}>
 			<Chat
 				key={chat.id}
 				chatId={chat.id}

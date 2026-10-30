@@ -416,7 +416,7 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
 		settings.enabled = raw.enabled;
 	}
-	for (const key of ["readQuestion", "autoplay"] as const) {
+	for (const key of ["readQuestion", "autoplay", "readModelAnswers"] as const) {
 		if (raw[key] === undefined) continue;
 		if (typeof raw[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
 		settings[key] = raw[key];

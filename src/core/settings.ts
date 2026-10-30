@@ -476,6 +476,9 @@ export interface SpeechSettings {
 	readQuestion?: boolean;
 	/** Read the reply to a turn you start as it arrives. Unset = off. */
 	autoplay?: boolean;
+	/** Include committed model answers in autoplay. Unset = off; manual
+	 * reading remains available either way. */
+	readModelAnswers?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -828,6 +831,8 @@ function sanitizeSpeech(raw: Record<string, unknown>): SpeechSettings {
 	if (readQuestion !== undefined) out.readQuestion = readQuestion;
 	const autoplay = boolOrDrop(raw.autoplay);
 	if (autoplay !== undefined) out.autoplay = autoplay;
+	const readModelAnswers = boolOrDrop(raw.readModelAnswers);
+	if (readModelAnswers !== undefined) out.readModelAnswers = readModelAnswers;
 	if (raw.provider === "openai" || raw.provider === "custom") out.provider = raw.provider;
 	const customModel = sanitizeSpeechId(raw.customModel);
 	if (customModel) out.customModel = customModel;

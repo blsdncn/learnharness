@@ -35,7 +35,9 @@ Only chat stores model budget pins and registers a pi-ai provider. TTS refuses
 missing configuration or unauthorized credentials instead of falling back to
 OpenAI. The OpenAI key is never sent to the custom server. Provider selection
 and custom model selection live in Providers → TTS; listening preferences live
-in Settings → TTS. All synthesis requests originate on the app server.
+in Settings → TTS. The settings dialog saves edits from both pages as patches,
+in order, over the last saved speech section, so quick edits never overwrite
+each other. All synthesis requests originate on the app server.
 
 `components/listen/speech-dom.ts` identifies reading blocks within separate
 transcript and dock roots. Plan, reasoning, code blocks, and drawings are
@@ -44,20 +46,32 @@ research and PDF briefs) until it is opened. KaTeX source annotations supply TeX
 reads row by row: the header row as-is, every other row with each cell
 under its column header. With "Read the question" on (Settings → TTS), a
 read that started in the transcript continues into the dock's question or
-practice problem; a folded dock opens when no scroll is needed and is
-otherwise read hidden (a folded practice bar carries a hidden copy of its
-statement for this).
+practice problem, once the turn has ended, so prose the reply appends meanwhile
+is read first. Reading never opens, folds, or scrolls the dock: a folded dock
+is read hidden (a folded practice bar carries a hidden copy of its statement
+for this), and the highlight finds the section when the learner opens it.
 `listen-controller.ts` owns one audio element and a reading queue, prefetches
 the next block, and fences late responses after stop or restart. While a
 turn is live (the chat's busy state) it reads only finished transcript
 blocks — one is finished once another follows it, or the turn ends — and
 waits instead of stopping when it catches up. "Autoplay replies" arms on
 each turn the learner starts (sends and dock answers, inside the gesture
-that unlocks the audio) and reads the reply from its first finished block
-past the learner's own rows (`data-listen-yours`), unless something is
-already reading or dictation is live. An autoplayed read passes over the
-research and PDF briefs (`data-listen-aside`) even when they're open, as
-does every read except one started inside that brief. Playback
+that unlocks the audio) and reads the reply from its first finished block,
+unless something is already reading or dictation is live. As it starts and
+advances, autoplay passes over the learner's own rows (`data-listen-yours`),
+answer records (`data-listen-answer-card`), and probe assessments
+(`data-listen-autoplay-skip`). "Read model answers" adds back only the
+marked model answer or model solution (`data-listen-model-answer`). With
+"Read the question" on, autoplay reads a practice problem from the dock, and
+only with the reply that posed it (matched by tool call id), so later
+attempts read just their feedback. A read the learner starts reads whatever
+follows it, including both copies of a problem. Stop, Esc, and leaving the
+session cancel an armed autoplay along with the current read. Automatic
+advancement passes over research and PDF briefs (`data-listen-aside`) even
+when they're open, except one started inside that brief. The player's
+Previous and Next buttons step through every readable block, including open
+briefs, learner answer cards, and model answers; automatic advancement keeps
+its skip rules afterward. Collapsed content stays unspoken. Playback
 speed is stored in browser localStorage. `listen.tsx` supplies one shared
 speaker, the current block highlight, and a player above the dock. Mouse
 input reveals the speaker on hover; touch input reveals it on a tap.

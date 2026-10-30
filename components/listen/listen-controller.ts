@@ -9,20 +9,26 @@
  *   read-from-here, the Speechify model) — the next block is found in the
  *   live DOM at each advance, so blocks that streamed in meanwhile count.
  *   With readQuestion on, a read from the transcript continues into the
- *   dock (speech-dom adjacentAcross). FOLLOW MODE while a turn is live
- *   (setLive): only finished transcript blocks are read — one is finished
- *   once a block follows it, or the turn ends — and reading that catches
- *   up waits ("waiting") instead of stopping — as does starting on a block
- *   still being written, until it's finished;
+ *   dock (speech-dom adjacentAcross) — the dock is never opened for it.
+ *   FOLLOW MODE while a turn is live (setLive): only finished transcript
+ *   blocks are read — one is finished once a block follows it, or the
+ *   turn ends — and reading that catches up waits ("waiting") instead of
+ *   stopping — as does starting on a block still being written, until
+ *   it's finished, and crossing into the dock, until the turn has ended
+ *   (prose the reply appends meanwhile comes first);
  * - "list": exactly these blocks (Compare: your answer, then the correct
  *   answer).
  *
  * AUTOPLAY (Settings → TTS): armAutoplay, called in the gesture that
  * starts a turn, unlocks the audio and marks the transcript; the reply's
- * first finished block that isn't the learner's own row starts a "from"
- * read — unless something is already reading or dictation is live.
- * Every "from" read passes over briefs (LISTEN_ASIDE_ATTR) except the one
- * it started in.
+ * first finished block starts a "from" read — unless something is already
+ * reading or dictation is live. An autoplayed read passes over what
+ * autoplayAllowed excludes (the learner's own rows going forward, answer
+ * records but an opted-in model answer, the transcript copy of the
+ * docked problem), and reads a docked problem only with the reply that
+ * posed it. Stop cancels an armed autoplay too.
+ * Automatic advancement passes over briefs (LISTEN_ASIDE_ATTR) except the
+ * one the read started in. Previous and Next can select any readable block.
  *
  * Each block is one POST /api/tts/openai; the next block's audio is fetched while
  * the current one plays, so only the first block waits.
@@ -31,7 +37,10 @@
 import { isDictationActive } from "@/components/dictation-state";
 import {
 	LISTEN_ASIDE_ATTR,
-	LISTEN_ENTER_DOCK_EVENT,
+	LISTEN_ANSWER_CARD_ATTR,
+	LISTEN_AUTOPLAY_SKIP_ATTR,
+	LISTEN_MODEL_ANSWER_ATTR,
+	LISTEN_PROBLEM_ATTR,
 	LISTEN_ROOT_ATTR,
 	LISTEN_YOURS_ATTR,
 	adjacentAcross,
@@ -39,6 +48,7 @@ import {
 	blockLabel,
 	blocksIn,
 	dockRoot,
+	isDockedProblem,
 	rootOf,
 	speechParts,
 } from "./speech-dom";
@@ -61,9 +71,16 @@ export interface ListenSnapshot {
 export const LISTEN_RATES = [0.8, 1, 1.2, 1.4, 1.6, 1.8, 2] as const;
 const RATE_KEY = "lh:listen-rate";
 
+/** Existing message containers stay history when their readable content changes. */
+interface AutoplayTurn {
+	root: Element;
+	history: ReadonlySet<Element>;
+}
+
 /** `aside`: the brief the read started in, the only one it reads (see
- *  LISTEN_ASIDE_ATTR); every other is passed over. */
-type Queue = { kind: "from"; root: Element; aside: Element | null } | { kind: "list"; blocks: Element[] };
+ *  LISTEN_ASIDE_ATTR); every other is passed over. `autoplay`: the turn
+ *  whose reply started this automatic read. */
+type Queue = { kind: "from"; root: Element; aside: Element | null; autoplay?: AutoplayTurn } | { kind: "list"; blocks: Element[] };
 
 const asideOf = (block: Element) => block.closest(`[${LISTEN_ASIDE_ATTR}]`);
 
@@ -117,19 +134,19 @@ export class ListenController {
 	readQuestion = false;
 	/** "Autoplay replies" (Settings → TTS), kept current by the provider. */
 	autoplay = false;
+	/** Include model answers in autoplay; explicit reads ignore this flag. */
+	readModelAnswers = false;
 	/** A turn is generating (follow mode), kept current by the chat. */
 	private live = false;
 	private settleTimer: ReturnType<typeof setTimeout> | undefined;
-	/** The block being read is in the dock (the crossing event). */
-	private inDock = false;
 	private anchor: Anchor | null = null;
 	/** Read from here on a block still being written: read it once it's
 	 *  finished (found again by its root and index — its text is growing). */
 	private waitFor: { block: Element; root: string | null; index: number } | null = null;
-	/** Autoplay waiting for its reply: blocks past `mark` are the reply's. */
-	private armed: { mark: number; sawLive: boolean; at: number } | null = null;
+	/** Autoplay waiting for new message containers, not a mutable block count. */
+	private armed: { turn: AutoplayTurn; sawLive: boolean; at: number } | null = null;
 	private observer: MutationObserver | null = null;
-	private pokeQueued = false;
+	private pokeTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor() {
 		const stored = typeof localStorage === "undefined" ? null : Number(localStorage.getItem(RATE_KEY));
@@ -164,12 +181,16 @@ export class ListenController {
 		return this.audio;
 	}
 
+	/** Esc can cancel a reply before any audio or player is visible. */
+	get pendingAutoplay(): boolean {
+		return this.armed !== null;
+	}
+
 	// ── commands ────────────────────────────────────────────────────────────
 	/** Read `block`, then keep going through its root. Call from the click. */
 	playFrom(block: Element) {
 		const root = rootOf(block);
-		if (!root) return;
-		this.start({ kind: "from", root, aside: asideOf(block) }, block);
+		if (root) this.start({ kind: "from", root, aside: asideOf(block) }, block);
 	}
 
 	/** Read exactly these blocks, in order. Call from the click. */
@@ -178,7 +199,16 @@ export class ListenController {
 		if (first) this.start({ kind: "list", blocks }, first);
 	}
 
+	/** Stop reading and forget an armed autoplay: nothing on this page
+	 *  starts reading later (Stop, Esc, leaving the session). */
 	stop() {
+		this.armed = null;
+		clearTimeout(this.settleTimer);
+		this.halt();
+	}
+
+	/** The queue ran out: an armed autoplay still waits for its reply. */
+	private halt() {
 		this.session++;
 		this.queue = null;
 		this.dropClips();
@@ -186,7 +216,6 @@ export class ListenController {
 			this.audio.pause();
 			this.audio.removeAttribute("src");
 		}
-		this.inDock = false;
 		this.anchor = null;
 		this.waitFor = null;
 		if (!this.armed) this.unwatch();
@@ -206,14 +235,20 @@ export class ListenController {
 	}
 
 	next() {
-		const next = this.neighbor(1);
-		if (next && this.ready(next)) this.goTo(next);
-		else if (this.following()) this.wait();
+		this.navigate(1);
 	}
 
 	prev() {
-		const prev = this.neighbor(-1);
-		if (prev) this.goTo(prev);
+		this.navigate(-1);
+	}
+
+	/** The player's buttons are manual selections; subsequent automatic
+	 * advancement keeps the queue's existing exclusions. */
+	private navigate(dir: 1 | -1) {
+		const block = this.neighbor(dir, true);
+		if (block && (this.queue?.kind === "list" || this.ready(block))) this.goTo(block);
+		else if (block) this.wait(block);
+		else if (dir === 1 && this.following()) this.wait();
 	}
 
 	setRate(rate: number) {
@@ -244,7 +279,7 @@ export class ListenController {
 		const transcript = transcriptRoot();
 		if (!transcript) return;
 		if (!this.busy()) this.unlock();
-		this.armed = { mark: blocksIn(transcript).length, sawLive: this.live, at: Date.now() };
+		this.armed = { turn: { root: transcript, history: new Set(transcript.children) }, sawLive: this.live, at: Date.now() };
 		this.watch();
 	}
 
@@ -264,7 +299,7 @@ export class ListenController {
 				const next = this.neighbor(1);
 				if (next && this.ready(next)) this.goTo(next);
 				else if (this.following()) this.wait();
-				else this.stop();
+				else this.halt();
 			});
 		}
 		return this.audio;
@@ -284,13 +319,10 @@ export class ListenController {
 		this.dropClips();
 		this.queue = queue;
 		if (queue.kind === "from" && !this.ready(first)) {
-			const root = rootOf(first);
-			this.waitFor = { block: first, root: root?.getAttribute(LISTEN_ROOT_ATTR) ?? null, index: root ? blocksIn(root).indexOf(first) : -1 };
-			this.set({ block: null });
-			this.wait();
+			this.wait(first);
 			return;
 		}
-		this.goTo(first, true);
+		this.goTo(first);
 	}
 
 	private busy(): boolean {
@@ -304,15 +336,23 @@ export class ListenController {
 	}
 
 	/** Follow mode: a transcript block is finished once another follows it
-	 *  (markdown streams in order) or the turn has ended. */
+	 *  (markdown streams in order) or the turn has ended. A read crossing
+	 *  from the transcript into the dock waits for the turn's end. */
 	private ready(block: Element): boolean {
 		if (!this.live) return true;
 		const root = rootOf(block);
-		if (root?.getAttribute(LISTEN_ROOT_ATTR) !== "transcript") return true;
-		return adjacentBlock(block, root, 1) !== null;
+		if (root?.getAttribute(LISTEN_ROOT_ATTR) === "transcript") return adjacentBlock(block, root, 1) !== null;
+		const q = this.queue;
+		const at = this.activeBlock();
+		return q?.kind !== "from" || q.root === root || (at !== null && rootOf(at) === root);
 	}
 
-	private wait() {
+	private wait(block?: Element) {
+		if (block) {
+			const root = rootOf(block);
+			this.waitFor = { block, root: root?.getAttribute(LISTEN_ROOT_ATTR) ?? null, index: root ? blocksIn(root).indexOf(block) : -1 };
+			this.set({ block: null });
+		}
 		this.session++;
 		this.audio?.pause();
 		this.set({ status: "waiting", label: "Waiting…", position: null, error: null });
@@ -323,10 +363,8 @@ export class ListenController {
 	private watch() {
 		if (this.observer || typeof MutationObserver === "undefined") return;
 		this.observer = new MutationObserver(() => {
-			if (this.pokeQueued) return;
-			this.pokeQueued = true;
-			setTimeout(() => {
-				this.pokeQueued = false;
+			this.pokeTimer ??= setTimeout(() => {
+				this.pokeTimer = undefined;
 				this.poke();
 			}, 50);
 		});
@@ -336,6 +374,8 @@ export class ListenController {
 	private unwatch() {
 		this.observer?.disconnect();
 		this.observer = null;
+		clearTimeout(this.pokeTimer);
+		this.pokeTimer = undefined;
 	}
 
 	/** Re-check a caught-up read and an armed autoplay. `settled`: the turn
@@ -344,8 +384,8 @@ export class ListenController {
 		if (this.snapshot.status === "waiting") {
 			const pending = this.waitFor;
 			const next = pending ? this.waitedFor(pending) : this.neighbor(1);
-			if (next && this.ready(next)) this.goTo(next, pending !== null);
-			else if (settled && !this.live) this.stop();
+			if (next && this.ready(next)) this.goTo(next);
+			else if (settled && !this.live) this.halt();
 		}
 		this.tryAutoplay(settled);
 		if (this.snapshot.status !== "waiting" && !this.armed) this.unwatch();
@@ -358,16 +398,14 @@ export class ListenController {
 			this.armed = null;
 			return;
 		}
-		const transcript = transcriptRoot();
-		const reply = transcript
-			? blocksIn(transcript).slice(armed.mark).find((b) => !b.closest(`[${LISTEN_YOURS_ATTR}], [${LISTEN_ASIDE_ATTR}]`))
-			: undefined;
+		const reply = this.replyBlocks(armed.turn).find((b) => !asideOf(b) && this.autoplayAllowed(b));
 		let first: Element | null = reply && this.ready(reply) ? reply : null;
 		const over = settled && armed.sawLive && !this.live;
 		// A reply that is only a question: read the question.
 		if (!first && over && this.readQuestion) {
 			const dock = dockRoot(document);
-			first = dock ? (blocksIn(dock)[0] ?? null) : null;
+			const question = dock ? (blocksIn(dock)[0] ?? null) : null;
+			first = question && this.dockAllowed(question, armed.turn) ? question : null;
 		}
 		if (!first) {
 			if (over) this.armed = null;
@@ -379,18 +417,54 @@ export class ListenController {
 		const root = rootOf(first);
 		if (!root) return;
 		this.dropClips();
-		this.queue = { kind: "from", root, aside: null };
-		this.goTo(first, true);
+		this.queue = { kind: "from", root, aside: null, autoplay: armed.turn };
+		this.goTo(first);
 	}
 
-	private neighbor(dir: 1 | -1): Element | null {
+	/** Only containers added after the send belong to its reply. Expanding
+	 * or collapsing thinking/briefs inside history cannot move this boundary. */
+	private replyBlocks({ root, history }: AutoplayTurn): Element[] {
+		if (!root.isConnected) return [];
+		return blocksIn(root).filter((block) => {
+			let container = block;
+			while (container.parentElement && container.parentElement !== root) container = container.parentElement;
+			return !history.has(container);
+		});
+	}
+
+	/** A practice problem stays in the dock across attempts. Autoplay
+	 * reads it only with the reply that posed its ID;
+	 * teaching questions carry no ID. */
+	private dockAllowed(block: Element, turn: AutoplayTurn): boolean {
+		const id = block.getAttribute(LISTEN_PROBLEM_ATTR);
+		if (!id) return true;
+		return this.replyBlocks(turn).some((b) => b.getAttribute(LISTEN_PROBLEM_ATTR) === id);
+	}
+
+	/** Where autoplay starts and what it automatically advances onto. It
+	 * passes the learner's own rows; the player's buttons bypass these rules.
+	 * A model answer inside a card is the one opt-in exception, not a
+	 * reason to read the rest of the card. With Read the question on,
+	 * the docked problem is read from the dock alone. */
+	private autoplayAllowed(block: Element): boolean {
+		if (block.closest(`[${LISTEN_AUTOPLAY_SKIP_ATTR}]`)) return false;
+		if (block.closest(`[${LISTEN_MODEL_ANSWER_ATTR}]`)) return this.readModelAnswers;
+		if (block.closest(`[${LISTEN_ANSWER_CARD_ATTR}]`)) return false;
+		if (block.closest(`[${LISTEN_YOURS_ATTR}]`)) return false;
+		return !(this.readQuestion && isDockedProblem(block));
+	}
+
+	private neighbor(dir: 1 | -1, manual = false): Element | null {
 		const q = this.queue;
 		const at = this.activeBlock() ?? this.snapshot.block;
 		if (!q || !at) return null;
 		if (q.kind === "list") return q.blocks[q.blocks.indexOf(at) + dir] ?? null;
 		const step = (b: Element) => (this.readQuestion ? adjacentAcross(b, q.root, dir) : adjacentBlock(b, q.root, dir));
+		const turn = q.autoplay;
 		let next = step(at);
-		while (next && asideOf(next) && asideOf(next) !== q.aside) next = step(next);
+		if (manual) return next;
+		while (next && ((asideOf(next) && asideOf(next) !== q.aside) || (turn !== undefined && !this.autoplayAllowed(next)))) next = step(next);
+		if (next && turn !== undefined && rootOf(next) === dockRoot(document) && !this.dockAllowed(next, turn)) return null;
 		return next;
 	}
 
@@ -416,18 +490,10 @@ export class ListenController {
 		return q?.kind === "list" ? { index: q.blocks.indexOf(block), total: q.blocks.length } : null;
 	}
 
-	/** `first`: the queue's first block — nothing was read before it. */
-	private goTo(block: Element, first = false) {
+	private goTo(block: Element) {
 		this.waitFor = null;
 		const root = rootOf(block);
 		this.anchor = { root: root?.getAttribute(LISTEN_ROOT_ATTR) ?? null, index: root ? blocksIn(root).indexOf(block) : -1, text: textOf(block) };
-		const wasInDock = this.inDock;
-		this.inDock = dockRoot(document)?.contains(block) ?? false;
-		if (this.inDock && !wasInDock && !first) {
-			// Crossing into the dock: the chat may open it (activeBlock
-			// follows a section the opening re-renders).
-			document.dispatchEvent(new Event(LISTEN_ENTER_DOCK_EVENT));
-		}
 		if (!this.armed) this.unwatch();
 		const session = ++this.session;
 		const a = this.ensureAudio();

@@ -25,6 +25,7 @@ import { createContext, useContext, useEffect, useRef, useState, useSyncExternal
 import { createPortal } from "react-dom";
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon, Volume2Icon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { SpeechSettings } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { LISTEN_RATES, ListenController, type ListenSnapshot } from "./listen-controller";
@@ -56,14 +57,24 @@ interface SpeechPrefs {
 	configured: boolean;
 	readQuestion: boolean;
 	autoplay: boolean;
+	readModelAnswers: boolean;
 }
 
-const OFF: SpeechPrefs = { configured: false, readQuestion: false, autoplay: false };
+/** Unset or malformed preferences are off. */
+function speechPrefs(configured: unknown, s: Partial<Record<"readQuestion" | "autoplay" | "readModelAnswers", unknown>> | null | undefined): SpeechPrefs {
+	return { configured: configured === true, readQuestion: s?.readQuestion === true, autoplay: s?.autoplay === true, readModelAnswers: s?.readModelAnswers === true };
+}
+
+function applyPrefs(reader: ListenController, prefs: SpeechPrefs) {
+	reader.readQuestion = prefs.readQuestion;
+	reader.autoplay = prefs.configured && prefs.autoplay;
+	reader.readModelAnswers = prefs.readModelAnswers;
+}
 
 /** Is speech configured, does reading continue into the question, and
  *  are replies autoplayed? Re-read whenever keys or the speech section save. */
-function useSpeechPrefs(): SpeechPrefs {
-	const [prefs, setPrefs] = useState<SpeechPrefs>(OFF);
+function useSpeechPrefs(initialSpeech?: SpeechSettings): SpeechPrefs {
+	const [prefs, setPrefs] = useState<SpeechPrefs>(() => speechPrefs(initialSpeech?.enabled, initialSpeech));
 	const [tick, setTick] = useState(0);
 	useSettingsSaved((section) => {
 		if (section === "keys" || section === "speech") setTick((t) => t + 1);
@@ -72,8 +83,8 @@ function useSpeechPrefs(): SpeechPrefs {
 		let live = true;
 		fetch("/api/tts/openai")
 			.then((r) => (r.ok ? (r.json() as Promise<Partial<SpeechPrefs>>) : null))
-			.then((s) => live && setPrefs({ configured: s?.configured === true, readQuestion: s?.readQuestion === true, autoplay: s?.autoplay === true }))
-			.catch(() => live && setPrefs(OFF));
+			.then((s) => live && setPrefs(speechPrefs(s?.configured, s)))
+			.catch(() => live && setPrefs(speechPrefs(false, null)));
 		return () => {
 			live = false;
 		};
@@ -83,15 +94,32 @@ function useSpeechPrefs(): SpeechPrefs {
 
 const INTERACTIVE = "a, button, input, textarea, select, label, summary, [contenteditable], [role='button']";
 
-export function ListenProvider({ children }: { children: ReactNode }) {
-	const [controller] = useState(() => (typeof window === "undefined" ? null : new ListenController()));
-	const { configured, readQuestion, autoplay } = useSpeechPrefs();
+export function ListenProvider({ children, initialSpeech }: { children: ReactNode; initialSpeech?: SpeechSettings }) {
+	const prefs = useSpeechPrefs(initialSpeech);
+	const { configured } = prefs;
+	// Chat sends the opening prompt in a child mount effect. Initialize the
+	// controller before that effect, without waiting for the settings GET.
+	const [controller] = useState(() => {
+		if (typeof window === "undefined") return null;
+		const reader = new ListenController();
+		applyPrefs(reader, prefs);
+		return reader;
+	});
+	const lifetime = useRef(0);
 	useEffect(() => {
-		if (!controller) return;
-		controller.readQuestion = readQuestion;
-		controller.autoplay = configured && autoplay;
-	}, [controller, readQuestion, autoplay, configured]);
-	useEffect(() => () => controller?.stop(), [controller]);
+		if (controller) applyPrefs(controller, prefs);
+	}, [controller, prefs]);
+	useEffect(() => {
+		const generation = ++lifetime.current;
+		return () => {
+			// StrictMode replays mount effects without another opening send.
+			// Cancel that simulated teardown; a real unmount stops audio and
+			// forgets an armed autoplay, so nothing reads after leaving.
+			queueMicrotask(() => {
+				if (lifetime.current === generation) controller?.stop();
+			});
+		};
+	}, [controller]);
 	useEffect(() => { if (!configured) controller?.stop(); }, [configured, controller]);
 	return (
 		<ListenContext.Provider value={{ controller, configured }}>
@@ -186,16 +214,10 @@ function ListenOverlay({ controller }: { controller: ListenController }) {
 			const active = controller.activeBlock();
 			if (block && block !== active) {
 				const r = visibleRect(block);
-				const root = block.closest(`[${LISTEN_ROOT_ATTR}]`)?.getBoundingClientRect();
 				const size = 24;
-				// The left gutter when there is one; otherwise just past the
-				// block's right edge; otherwise inside its top-right corner.
-				const left =
-					!root || r.left - root.left >= size + 4
-						? r.left - size - 4
-						: r.right + size + 4 <= root.right
-							? r.right + 4
-							: r.right - size;
+				// The portal floats outside the block without changing layout.
+				// Stay on its left, clamped to the viewport on narrow screens.
+				const left = Math.max(0, r.left - size - 4);
 				const top = r.top + Math.max(0, Math.min(r.height, 26) / 2 - size / 2);
 				speaker.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
 				speaker.style.opacity = "1";
