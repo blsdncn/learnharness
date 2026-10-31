@@ -64,7 +64,7 @@ export function useEnterSubmits(submit: () => void): void {
 	submitRef.current = submit;
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key !== "Enter") return;
+			if (e.key !== "Enter" || e.defaultPrevented) return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 			if (isTypingSurface(e)) return;
 			const target = e.target as HTMLElement | null;

@@ -1,6 +1,6 @@
 /**
  * Speech: the contract between the listening UI
- * and POST /api/tts/openai. Pure, browser-safe.
+ * and GET/POST /api/tts/openai. Pure, browser-safe.
  *
  * The client sends one listenable BLOCK as parts in reading order: prose
  * as text, math as its TeX source (KaTeX keeps it in the DOM). The server
@@ -8,6 +8,25 @@
  * engine nor its locale data ever ship to the browser, then synthesizes
  * the joined text through the configured OpenAI-compatible endpoint.
  */
+
+export interface SpeechStatus {
+	/** Listening is enabled; this is not a provider readiness check. */
+	configured: boolean;
+	/** OpenAI: its key has a value. Custom: the endpoint's credential is
+	 *  authorized for its URL (or it's keyless). */
+	keyPresent: boolean;
+	/** The custom endpoint is the provider (otherwise OpenAI). */
+	custom: boolean;
+	baseUrl: string | null;
+	model: string | null;
+	voice: string;
+	/** Read from here continues into the dock (Settings → TTS). */
+	readQuestion: boolean;
+	/** Replies to turns you start are read as they arrive (Settings → TTS). */
+	autoplay: boolean;
+	/** Include committed model answers in autoplay (Settings → TTS). */
+	readModelAnswers: boolean;
+}
 
 export type SpeechPart = { text: string } | { tex: string };
 

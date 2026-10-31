@@ -18,31 +18,14 @@
  */
 
 import katex from "katex";
-import { normalizeSpokenText, splitSpokenText, type SpeechPart } from "../core/speech.ts";
+import { normalizeSpokenText, splitSpokenText, type SpeechPart, type SpeechStatus } from "../core/speech.ts";
 import { OPENAI_AUDIO_KEY_ID } from "../core/audio-connection.ts";
 import { TTS_ENDPOINT } from "../core/custom-provider-auth.ts";
 import { customEndpointCredential } from "./custom-provider-auth.ts";
 import { keyValue } from "./keys.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 
-export interface SpeechStatus {
-	/** Listening is enabled; this is not a provider readiness check. */
-	configured: boolean;
-	/** OpenAI: its key has a value. Custom: the endpoint's credential is
-	 *  authorized for its URL (or it's keyless). */
-	keyPresent: boolean;
-	/** The custom endpoint is the provider (otherwise OpenAI). */
-	custom: boolean;
-	baseUrl: string | null;
-	model: string | null;
-	voice: string;
-	/** Read from here continues into the dock (Settings → TTS). */
-	readQuestion: boolean;
-	/** Replies to turns you start are read as they arrive (Settings → TTS). */
-	autoplay: boolean;
-	/** Include committed model answers in autoplay (Settings → TTS). */
-	readModelAnswers: boolean;
-}
+export type { SpeechStatus } from "../core/speech.ts";
 
 /** The key one request may send: OpenAI's from Providers, or the custom
  *  endpoint's bound credential (undefined apiKey = keyless). */

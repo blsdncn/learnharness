@@ -34,7 +34,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createPortal } from "react-dom";
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon, Volume2Icon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isTypingSurface, kbdEventForAction, type SpeechSettings } from "@/src/core";
+import { isTypingSurface, kbdEventForAction, type SpeechSettings, type SpeechStatus } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { LISTEN_RATES, ListenController, startAutoplayTurn, type ListenSnapshot } from "./listen-controller";
@@ -53,7 +53,9 @@ interface Surface {
 interface ListenApi {
 	controller: ListenController | null;
 	configured: boolean;
+	/** Live claim: active playback, armed autoplay, or the focused player. */
 	claimsEscape: () => boolean;
+	/** Unlock and arm in the gesture; a resolved refusal disarms. */
 	startTurn: (start: () => Promise<boolean>) => Promise<boolean>;
 	/** Esc on listening: stop reading and an armed autoplay, and leave the
 	 *  keyboard surface, giving focus back. */
@@ -84,12 +86,7 @@ function useListenSnapshot(): ListenSnapshot {
 	);
 }
 
-interface SpeechPrefs {
-	configured: boolean;
-	readQuestion: boolean;
-	autoplay: boolean;
-	readModelAnswers: boolean;
-}
+type SpeechPrefs = Pick<SpeechStatus, "configured" | "readQuestion" | "autoplay" | "readModelAnswers">;
 
 /** Unset or malformed preferences are off. */
 function speechPrefs(configured: unknown, s: Partial<Record<"readQuestion" | "autoplay" | "readModelAnswers", unknown>> | null | undefined): SpeechPrefs {

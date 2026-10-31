@@ -143,7 +143,7 @@ describe("the listening keyboard surface", () => {
 
 	const QUIZ = { question: "Which is right?", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes." } as unknown as QuizToolInput;
 
-	interface Scene { paragraphs?: { id: string; text: string; key?: string; source?: string; part?: string }[]; answer?: QuestionAnswerData; question?: boolean; practice?: { expanded: boolean }; collapsed?: boolean; popup?: () => void; transcriptKey?: string }
+	interface Scene { paragraphs?: { id: string; text: string; key?: string; source?: string; part?: string }[]; answer?: QuestionAnswerData; question?: boolean; onAnswer?: () => void; practice?: { expanded: boolean }; collapsed?: boolean; popup?: () => void; transcriptKey?: string }
 	const PARAGRAPHS = [
 		{ id: "t1", text: "First paragraph." },
 		{ id: "t2", text: "Second paragraph." },
@@ -151,7 +151,7 @@ describe("the listening keyboard surface", () => {
 	];
 	let submitted: number;
 
-	function Session({ paragraphs = PARAGRAPHS, answer, question = false, practice, collapsed = true, popup, transcriptKey = "transcript" }: Scene) {
+	function Session({ paragraphs = PARAGRAPHS, answer, question = false, onAnswer, practice, collapsed = true, popup, transcriptKey = "transcript" }: Scene) {
 		listenApi = useListen();
 		controller = listenApi.controller;
 		const paragraph = (p: NonNullable<Scene["paragraphs"]>[number]) => p.source
@@ -169,7 +169,7 @@ describe("the listening keyboard surface", () => {
 					{practice ? (
 						<PracticeDock problemCallId="p1" input={{ statement: "Practice statement." }} expanded={practice.expanded} onExpand={() => {}} onSubmit={() => { submitted++; }} />
 					) : question ? (
-						<QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}} onSubmit={() => { submitted++; }} dictationClaim={false} />
+						<QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}} onSubmit={() => { submitted++; onAnswer?.(); }} dictationClaim={false} />
 					) : (
 						<form data-testid="composer"><textarea data-file-path-input="" id="composer" /></form>
 					)}
@@ -243,6 +243,18 @@ describe("the listening keyboard surface", () => {
 		host.remove();
 		frames.clear();
 		setDictationActive(false);
+	});
+
+	it("one bubbling Enter submits a dock answer once and keeps its reply armed", async () => {
+		await mount({ question: true, onAnswer: () => {
+			void listenApi.startTurn(() => Promise.resolve(submitted === 1));
+		} });
+		controller!.autoplay = true;
+		await press("ArrowDown");
+		await press(" ");
+		await press("Enter");
+		assert.equal(submitted, 1, "the document and window must not both submit");
+		assert.equal(controller!.pendingAutoplay, true, "no refused duplicate cancels the accepted reply");
 	});
 
 	it("defaults to no Escape claim without a provider", async () => {

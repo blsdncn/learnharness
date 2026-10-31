@@ -584,6 +584,8 @@ Every place the architecture is designed to be cut — the "one file" a future c
 |---|---|---|
 | Storage decision (JSON→SQLite, remote) | `src/server/stores.ts` | the adapters, once |
 | LLM engine / model per role | settings `models` slots + `src/agent/models.ts` (`piEngineFor`) | provider wiring, one place |
+| Speech synthesis | `src/core/speech.ts` + `src/server/speech.ts` | request/status contract and server-side provider synthesis |
+| Listening interaction | `components/listen/listen.tsx` | live Escape ownership and gesture-time turn startup |
 | Turn composition | `src/server/chat-handler.ts` | what a turn consists of |
 | Extraction trigger | `src/server/turn-service.ts` (`triggerExtraction`) | when the Library runs |
 | Practice orchestration | `src/agent/subagents/practice-pipeline.ts` | generation/grading flow without touching contracts |

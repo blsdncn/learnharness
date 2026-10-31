@@ -9,18 +9,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { resolveSettings, type SpeechSettings } from "@/src/core";
+import { resolveSettings, type SpeechSettings, type SpeechStatus } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { CommitInput, SettingsRow, Toggle } from "./controls";
 
 /** GET /api/tts/openai's readiness fields this page reads. */
-interface SpeechReadiness {
-	configured: boolean;
-	keyPresent: boolean;
-	custom: boolean;
-	baseUrl: string | null;
-	model: string | null;
-}
+type SpeechReadiness = Pick<SpeechStatus, "configured" | "keyPresent" | "custom" | "baseUrl" | "model">;
 
 const SAMPLE = "This is how LearnHarness will read to you.";
 
