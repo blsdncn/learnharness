@@ -5,12 +5,11 @@ import { parseHTML } from "linkedom";
 import type { Root } from "react-dom/client";
 import type { SpeechSettings } from "../src/core/settings.ts";
 import { SpeechSection } from "../components/settings/speech-section.tsx";
+import { replaceProperties } from "./helpers/browser";
 
 describe("TTS settings: listening controls, and the provider named with a link to Providers", () => {
 	const dom = parseHTML("<html><body></body></html>");
-	const previous = new Map<string, PropertyDescriptor | undefined>();
-	const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL")!;
-	const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL")!;
+	let restore: (() => void)[] = [];
 	let createRoot: typeof import("react-dom/client").createRoot;
 	let root: Root;
 	let host: HTMLDivElement;
@@ -29,7 +28,7 @@ describe("TTS settings: listening controls, and the provider named with a link t
 		pause() { this.paused = true; }
 	}
 	before(async () => {
-		for (const [key, value] of Object.entries({
+		restore = [replaceProperties(globalThis, {
 			React, window: dom.window, document: dom.document,
 			HTMLElement: dom.window.HTMLElement, Node: dom.window.Node,
 			IS_REACT_ACT_ENVIRONMENT: true, Audio: FakeAudio,
@@ -42,27 +41,17 @@ describe("TTS settings: listening controls, and the provider named with a link t
 				}
 				return Response.json({ configured: saved.enabled ?? false, custom: saved.provider === "custom", ...ready });
 			},
-		})) {
-			previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-			Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-		}
+		}), replaceProperties(URL, { createObjectURL: () => "blob:test-sample", revokeObjectURL: (url: string) => revoked.push(url) })];
 		// linkedom has no native input events: React's legacy propertychange
 		// fallback (see dictation-language tests).
 		Object.assign(dom.window.HTMLElement.prototype, {
 			attachEvent(this: { propertyChange?: unknown }, _name: string, handler: unknown) { this.propertyChange = handler; },
 			detachEvent() {},
 		});
-		Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test-sample" });
-		Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: (url: string) => revoked.push(url) });
 		({ createRoot } = await import("react-dom/client"));
 	});
 	after(() => {
-		for (const [key, descriptor] of previous) {
-			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-			else delete (globalThis as Record<string, unknown>)[key];
-		}
-		Object.defineProperty(URL, "createObjectURL", originalCreate);
-		Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+		for (const undo of restore) undo();
 	});
 	beforeEach(() => {
 		saved = { voice: "alloy" };

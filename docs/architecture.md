@@ -15,85 +15,38 @@ Status: **the canonical architecture spec** — describes the as-built system, v
 
 ---
 
-## Listening (2026-10-26)
+## Listening
 
-`src/core/speech.ts` defines the browser-safe speech request contract and
-text splitting. `src/server/speech.ts` resolves the TTS connection,
-converts TeX to English with KaTeX and speech-rule-engine, and calls
-`/audio/speech`. `POST /api/tts/openai` streams MP3 audio to the client;
-`GET /api/tts/openai` reports activation and key presence without exposing
-credentials or probing the provider. Settings → TTS controls listening and
-the voice, and names the provider with a link to Providers. No voice
-discovery is required.
+Listening is opt-in through Settings → TTS. `src/core/speech.ts` defines
+the browser-safe request contract and text splitting; `src/server/speech.ts`
+converts TeX with KaTeX and speech-rule-engine and calls `/audio/speech`.
+`GET /api/tts/openai` reports listening preferences and credential status;
+`POST` streams MP3. Requests originate on the app server, credentials stay
+there, provider error bodies are withheld, and cancellation aborts synthesis.
+The engine and its runtime data are included in standalone tracing.
 
-`src/core/audio-connection.ts` resolves OpenAI's fixed `gpt-4o-mini-tts`
-model and `OPENAI_API_KEY`, or TTS's independent custom endpoint and selected
-model. `customTtsProvider` is a top-level settings entry, managed only through
-`/api/tts/custom-endpoint`. This route reuses chat's connect/disconnect handler,
-model discovery, and URL-bound credentials, with a separate `CUSTOM_TTS_API_KEY`.
-Only chat stores model budget pins and registers a pi-ai provider. TTS refuses
-missing configuration or unauthorized credentials instead of falling back to
-OpenAI. The OpenAI key is never sent to the custom server. Provider selection
-and custom model selection live in Providers → TTS; listening preferences live
-in Settings → TTS. The settings dialog saves edits from both pages as patches,
-in order, over the last saved speech section, so quick edits never overwrite
-each other. All synthesis requests originate on the app server.
+Providers → TTS selects OpenAI or an independent custom endpoint and model.
+`/api/tts/custom-endpoint` reuses chat's connection machinery with separate
+settings and URL-bound credentials (`CUSTOM_TTS_API_KEY`); it neither publishes
+chat models nor stores chat budget pins. A custom-provider failure never falls
+back to OpenAI. Edits from both settings pages save as ordered speech patches.
 
-`components/listen/speech-dom.ts` identifies reading blocks within separate
-transcript and dock roots. Plan, reasoning, code blocks, and drawings are
-excluded, as is anything inside a collapsed `<details>` (tool-card details,
-research and PDF briefs) until it is opened. KaTeX source annotations supply TeX once per equation. A table
-reads row by row: the header row as-is, every other row with each cell
-under its column header. With "Read the question" on (Settings → TTS), a
-read that started in the transcript continues into the dock's question or
-practice problem, once the turn has ended, so prose the reply appends meanwhile
-is read first. Reading never opens, folds, or scrolls the dock: a folded dock
-is read hidden (a folded practice bar carries a hidden copy of its statement
-for this), and the highlight finds the section when the learner opens it.
-`listen-controller.ts` owns one audio element and a reading queue, prefetches
-the next block, and fences late responses after stop or restart. While a
-turn is live (the chat's busy state) it reads only finished transcript
-blocks — one is finished once another follows it, or the turn ends — and
-waits instead of stopping when it catches up. "Autoplay replies" arms on
-each turn the learner starts (sends and dock answers, inside the gesture
-that unlocks the audio) and reads the reply from its first finished block,
-unless something is already reading or dictation is live. As it starts and
-advances, autoplay passes over the learner's own rows (`data-listen-yours`),
-answer records (`data-listen-answer-card`), and probe assessments
-(`data-listen-autoplay-skip`). "Read model answers" adds back only the
-marked model answer or model solution (`data-listen-model-answer`). With
-"Read the question" on, autoplay reads a practice problem from the dock, and
-only with the reply that posed it (matched by tool call id), so later
-attempts read just their feedback. A read the learner starts reads whatever
-follows it, including both copies of a problem. Stop, Esc, and leaving the
-session cancel an armed autoplay along with the current read. Automatic
-advancement passes over research and PDF briefs (`data-listen-aside`) even
-when they're open, except one started inside that brief. The player's
-Previous and Next buttons step through every readable block, including open
-briefs, learner answer cards, and model answers; automatic advancement keeps
-its skip rules afterward. Collapsed content stays unspoken. Playback
-speed is stored in browser localStorage. `listen.tsx` supplies one shared
-speaker, the current block highlight, and a player above the dock. Mouse
-input reveals the speaker on hover; touch input reveals it on a tap.
-Answered explain cards can queue the learner's answer followed by the
-committed answer with Compare. Practice statements and revealed solutions
-use the same block markers. Listening is opt-in: `speech.enabled` turns it
-on, including for keyless servers, and unset means off. Request cancellation stops upstream
-synthesis; provider error bodies are withheld because they may echo credentials.
-The server-only speech-rule-engine package and its locale data are
-included explicitly in standalone tracing through `next.config.ts`.
+`components/listen/speech-dom.ts` owns readable blocks, text/TeX extraction,
+source identities and anchors shared by playback, keyboard selection and
+streaming waits. `listen-controller.ts` owns one audio element, the queue,
+prefetch and cancellation fencing; `listen.tsx` supplies the player and
+pointer/keyboard interaction. Live reads wait for finished blocks. Autoplay
+recognizes new sources inside existing message groups and applies its content
+filters; manual reads and Previous/Next retain explicit access. Collapsed and
+technical content stays unspoken. Optional question following reads a folded
+dock without opening, folding or scrolling it. Stop, Esc and session teardown
+cancel playback and armed autoplay. Playback speed is stored on the device.
+See [Listening keyboard controls](keyboard.md#listening-surface).
 
-`tests/speech-http.test.ts` exercises the route through an independent
-strict HTTP implementation of the OpenAI speech contract. It checks
-authentication, keyless requests, splitting, and cancellation without a
-fetch stub. `node --import tsx scripts/smoke-tts.mjs` is an opt-in live
-synthesis check using isolated temporary settings: OpenAI with
-`OPENAI_API_KEY` (or `OPENAI_API_KEY_FILE`) by default; `TTS_BASE_URL`
-(with the required `TTS_MODEL`) connects the custom endpoint through its
-real Connect route, authenticated by the optional `CUSTOM_TTS_API_KEY` or
-`CUSTOM_TTS_API_KEY_FILE`. `TTS_VOICE` sets the voice.
-The probe keeps audio in memory and uses temporary settings and credentials.
-It never edits the user's settings or credential store.
+`tests/speech-http.test.ts` checks the synthesis contract against a local HTTP
+provider. The opt-in live check, `node --import tsx scripts/smoke-tts.mjs`, uses
+isolated temporary settings and keeps audio in memory; its header documents
+OpenAI/custom-endpoint configuration. Neither check edits user settings.
 
 ## 1. Two axes, one law
 
@@ -269,6 +222,7 @@ flowchart LR
         LLM["LLM engines — pi-ai/OpenRouter via piEngineFor"]
         HEAD["headless Chrome — demo verify · SVG render"]
         DEEP["Deepgram STT — token-minting route, browser-side WebSocket"]
+        TTS["TTS — server → OpenAI or custom /audio/speech, credentials server-side"]
         WEB["web tools — Google CSE + Readability/Jina (researcher)"]
     end
 
@@ -285,7 +239,10 @@ flowchart LR
     SESS --> HEAD
     SESS --> WEB
     BROWSER --> DEEP
+    HTTP --> TTS
 ```
+
+Speech synthesis (TTS) is described in [Listening](#listening).
 
 ---
 
@@ -493,6 +450,7 @@ flowchart LR
     subgraph OUTSIDE["outside the process"]
         OR["OpenRouter (BYOK key from auth.json, env-injected — never argv)"]
         DG["Deepgram STT (browser-direct WebSocket)"]
+        TTSP["TTS: OpenAI or custom /audio/speech (server-held key, never the browser)"]
         GCSE["Google CSE / Jina (researcher tools)"]
         CHROME["system Chrome (headless: demo verify · SVG render)"]
         DISK["data/ ledgers (via LH_DATA_DIR seam)"]
@@ -501,6 +459,7 @@ flowchart LR
     NEXT --> GCSE
     NEXT --> CHROME
     NEXT --> DISK
+    NEXT --> TTSP
     REND --> DG
     REND -->|"fetch /api/*"| NEXT
 ```

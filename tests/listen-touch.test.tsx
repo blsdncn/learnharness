@@ -6,12 +6,13 @@ import { parseHTML } from "linkedom";
 import { ListenProvider, useListen } from "../components/listen/listen";
 import type { ListenController } from "../components/listen/listen-controller";
 import { SETTINGS_SAVED_EVENT } from "../components/settings-signal";
+import { replaceProperties } from "./helpers/browser";
 
 /** Mount the actual overlay: touch release includes the non-hovering
  * pointer's leave event, which used to arm the mouse's hide timer. */
 describe("listening pointer lifetimes", () => {
 	const dom = parseHTML("<html><body></body></html>");
-	const previous = new Map<string, PropertyDescriptor | undefined>();
+	let restore = () => {};
 	const frames = new Map<number, FrameRequestCallback>();
 	let frameId = 0;
 	let root: Root;
@@ -21,7 +22,7 @@ describe("listening pointer lifetimes", () => {
 	let createRoot: typeof import("react-dom/client").createRoot;
 
 	before(async () => {
-		for (const [key, value] of Object.entries({
+		restore = replaceProperties(globalThis, {
 			React,
 			window: dom.window,
 			document: dom.document,
@@ -36,18 +37,10 @@ describe("listening pointer lifetimes", () => {
 				return frameId;
 			},
 			cancelAnimationFrame: (id: number) => frames.delete(id),
-		})) {
-			previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-			Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-		}
+		});
 		({ createRoot } = await import("react-dom/client"));
 	});
-	after(() => {
-		for (const [key, descriptor] of previous) {
-			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-			else delete (globalThis as Record<string, unknown>)[key];
-		}
-	});
+	after(() => restore());
 
 	function Content() {
 		controller = useListen().controller;

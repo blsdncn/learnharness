@@ -98,8 +98,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is the provider. */
-	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean; autoplay: boolean; readModelAnswers: boolean } & AudioConnection;
+	/** Absent options resolve to the factory (listening off); the connection is OpenAI unless the custom endpoint is the provider. */
+	speech: { enabled: boolean; voice: string; readQuestion: boolean; autoplay: boolean; readModelAnswers: boolean } & AudioConnection;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
@@ -230,11 +230,11 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
 		},
 		speech: {
-			enabled: record?.speech?.enabled,
+			enabled: record?.speech?.enabled ?? FACTORY_SETTINGS.speech.enabled,
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
-			readQuestion: record?.speech?.readQuestion ?? false,
-			autoplay: record?.speech?.autoplay ?? false,
-			readModelAnswers: record?.speech?.readModelAnswers ?? false,
+			readQuestion: record?.speech?.readQuestion ?? FACTORY_SETTINGS.speech.readQuestion,
+			autoplay: record?.speech?.autoplay ?? FACTORY_SETTINGS.speech.autoplay,
+			readModelAnswers: record?.speech?.readModelAnswers ?? FACTORY_SETTINGS.speech.readModelAnswers,
 			...ttsConnection(record?.speech?.provider, record?.customTtsProvider, record?.speech?.customModel),
 		},
 		customProvider: {

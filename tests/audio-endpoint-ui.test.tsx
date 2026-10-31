@@ -63,9 +63,7 @@ for (const feature of [
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
-	const render = (provider: string) => act(async () => root.render(<KeysSection audio={{
-		tts: choice(provider) as never,
-	}} />));
+	const render = (provider: string) => act(async () => root.render(<KeysSection tts={choice(provider) as never} />));
 	cleanup = async () => { await act(async () => root.unmount()); host.remove(); };
 	await render(feature.builtIns[0]);
 
@@ -154,7 +152,7 @@ for (const prefix of ["", "tts-"]) test(`Escape closes the TTS model menu before
 		}
 		if (!stopped) target.dispatchEvent(event);
 	});
-	await act(async () => root.render(<KeysSection audio={{ tts: { provider: "custom", onProvider() {}, customModel: "voice-model", onCustomModel() {} } }} />));
+	await act(async () => root.render(<KeysSection tts={{ provider: "custom", onProvider() {}, customModel: "voice-model", onCustomModel() {} }} />));
 	await click(`${prefix}custom-endpoint-row-btn`);
 	await click("tts-custom-model");
 	assert.ok(q(`${prefix}custom-endpoint-editor`));

@@ -684,7 +684,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 <button
 			type="button"
 			data-testid="plan-block-full"
-			// Never listenable (owner ruling, listen wave): the plan is navigation.
+			// Never listenable: the plan is navigation.
 			data-listen-skip=""
 			aria-label="Open the full plan"
 			onClick={onOpen}

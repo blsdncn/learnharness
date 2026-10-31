@@ -93,7 +93,7 @@ const nextConfig: NextConfig = {
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
-			// Listen wave (2026-10-26): math speech's engine reads its locale
+			// Math speech's engine reads its locale
 			// data via a runtime path (lib/mathmaps/<locale>.json) the tracer
 			// cannot see. Only the two files the English setup loads.
 			"node_modules/speech-rule-engine/lib/mathmaps/{base,en}.json",

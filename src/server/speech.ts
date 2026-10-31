@@ -1,5 +1,5 @@
 /**
- * Speech (listen wave, 2026-10-26): text-to-speech through the OpenAI shape —
+ * Speech: text-to-speech through the OpenAI shape —
  * `POST {baseUrl}/audio/speech` with {model, voice, input, response_format}
  * returning audio bytes. OpenAI by default; the TTS custom endpoint (any
  * compatible hosted or local server, connected in Settings → Providers →
@@ -54,7 +54,7 @@ function speechCredential(custom: boolean): { ok: true; apiKey?: string } | { ok
 
 export function speechStatus(): SpeechStatus {
 	const { enabled, voice, readQuestion, autoplay, readModelAnswers, custom, baseUrl, model } = effectiveSettings().speech;
-	return { configured: enabled ?? false, keyPresent: speechCredential(custom).ok, custom, baseUrl, model, voice, readQuestion, autoplay, readModelAnswers };
+	return { configured: enabled, keyPresent: speechCredential(custom).ok, custom, baseUrl, model, voice, readQuestion, autoplay, readModelAnswers };
 }
 
 /** A refusal carrying the HTTP status the route should answer with. */

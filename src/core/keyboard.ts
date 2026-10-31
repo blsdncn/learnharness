@@ -36,7 +36,16 @@ export type KeyAction =
 	| "question-pick-row"
 	| "question-submit"
 	| "open-settings"
-	| "toggle-user-thinking";
+	| "toggle-user-thinking"
+	| "focus-listening"
+	| "listening-select-prev"
+	| "listening-select-next"
+	| "listening-read"
+	| "listening-pause"
+	| "listening-prev-block"
+	| "listening-next-block"
+	| "listening-speed"
+	| "listening-stop";
 
 /** Where the cheat sheet groups an action (display only — dispatch is
  *  global; a seam that isn't mounted simply no-ops). */
@@ -49,7 +58,7 @@ export interface KeyActionDef {
 	scope: KeyScope;
 	binding: string;
 	/** Display-only (cheat sheet) — contextual keys a SURFACE owns (the
-	 *  question dock's row machine); never dispatched from the registry,
+	 *  question dock's row machine or listening player); never dispatched from the registry,
 	 *  so they can't leak to pages where the surface isn't mounted. */
 	displayOnly?: boolean;
 }
@@ -69,6 +78,10 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "new-session", label: "New session", scope: "global", binding: "mod+n" },
 	{ id: "rename-session", label: "Rename session", scope: "chat", binding: "f2" },
 	{ id: "toggle-user-thinking", label: "Toggle all your thinking", scope: "chat", binding: "mod+t" },
+	// Listening: the shortcut focuses the session's
+	// player as a keyboard surface — Listening must be on; it never starts
+	// audio by itself. The surface then owns the bare keys below.
+	{ id: "focus-listening", label: "Focus listening", scope: "chat", binding: "mod+shift+l" },
 	// Mod+F is surface-scoped: graph node search and session text Find share
 	// one action/binding. Only the currently mounted surface listens.
 	{ id: "find", label: "Find", scope: "global", binding: "mod+f" },
@@ -85,6 +98,16 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "question-prev-row", label: "Question · previous row", scope: "chat", binding: "arrowup", displayOnly: true },
 	{ id: "question-pick-row", label: "Question · pick row", scope: "chat", binding: "space", displayOnly: true },
 	{ id: "question-submit", label: "Question · submit", scope: "chat", binding: "enter", displayOnly: true },
+	// The listening surface's keys — displayOnly like the dock's: they act
+	// only while focus is inside the focused player (components/listen).
+	{ id: "listening-select-prev", label: "Listening · select previous block", scope: "chat", binding: "arrowup", displayOnly: true },
+	{ id: "listening-select-next", label: "Listening · select next block", scope: "chat", binding: "arrowdown", displayOnly: true },
+	{ id: "listening-read", label: "Listening · read from selection", scope: "chat", binding: "enter", displayOnly: true },
+	{ id: "listening-pause", label: "Listening · pause / resume", scope: "chat", binding: "space", displayOnly: true },
+	{ id: "listening-prev-block", label: "Listening · previous block", scope: "chat", binding: "arrowleft", displayOnly: true },
+	{ id: "listening-next-block", label: "Listening · next block", scope: "chat", binding: "arrowright", displayOnly: true },
+	{ id: "listening-speed", label: "Listening · change speed", scope: "chat", binding: "s", displayOnly: true },
+	{ id: "listening-stop", label: "Listening · stop and leave", scope: "chat", binding: "escape", displayOnly: true },
 ];
 
 const STORAGE_KEY = "lh:keymap";

@@ -6,12 +6,11 @@ import { parseHTML } from "linkedom";
 import { ListenProvider, useListen } from "../components/listen/listen";
 import type { ListenController } from "../components/listen/listen-controller";
 import type { SpeechSettings } from "../src/core";
+import { FakeAudio, replaceProperties } from "./helpers/browser";
 
 describe("listening at session startup", () => {
 	const dom = parseHTML("<html><body></body></html>");
-	const previous = new Map<string, PropertyDescriptor | undefined>();
-	const originalCreate = URL.createObjectURL;
-	const originalRevoke = URL.revokeObjectURL;
+	let restore: (() => void)[] = [];
 	let createRoot: typeof import("react-dom/client").createRoot;
 	let root: Root;
 	let host: HTMLDivElement;
@@ -21,19 +20,8 @@ describe("listening at session startup", () => {
 	let releaseStatus: (response: Response) => void;
 	let status: Promise<Response>;
 	let audio: FakeAudio;
-	class FakeAudio {
-		src = "";
-		playbackRate = 1;
-		preservesPitch = true;
-		private listeners = new Map<string, () => void>();
-		addEventListener(type: string, fn: () => void) { this.listeners.set(type, fn); }
-		play() { return Promise.resolve(); }
-		pause() {}
-		removeAttribute() {}
-		end() { this.listeners.get("ended")?.(); }
-	}
 	before(async () => {
-		for (const [key, value] of Object.entries({
+		restore = [replaceProperties(globalThis, {
 			React, window: dom.window, document: dom.document,
 			Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
 			Node: dom.window.Node, Event: dom.window.Event, MutationObserver: dom.window.MutationObserver,
@@ -48,21 +36,11 @@ describe("listening at session startup", () => {
 				}
 				return (await status).clone();
 			},
-		})) {
-			previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-			Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-		}
-		URL.createObjectURL = () => "blob:clip";
-		URL.revokeObjectURL = () => {};
+		}), replaceProperties(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => {} })];
 		({ createRoot } = await import("react-dom/client"));
 	});
 	after(() => {
-		for (const [key, descriptor] of previous) {
-			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-			else delete (globalThis as Record<string, unknown>)[key];
-		}
-		URL.createObjectURL = originalCreate;
-		URL.revokeObjectURL = originalRevoke;
+		for (const undo of restore) undo();
 	});
 	beforeEach(() => {
 		controller = null;

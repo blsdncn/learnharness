@@ -85,7 +85,8 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
-import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
+import { startAutoplayTurn } from "@/components/listen/listen-controller";
+import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR, listenSourceProps } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -375,8 +376,9 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
-	// Listening claims Esc too (listen wave): stop reading before anything
-	// underneath is dismissed or aborted.
+	// Listening claims Esc too: stop reading before anything
+	// underneath is dismissed or aborted — and leave the focused player
+	// (Cmd/Ctrl+Shift+L), even idle, without touching the question or turn.
 	const listen = useListen();
 	const listening = useListenSnapshot().status !== "idle";
 	const listeningRef = useRef(false);
@@ -385,22 +387,15 @@ export function Chat({
 	listenRef.current = listen;
 	// AUTOPLAY (Settings → TTS): every turn the learner starts here — a
 	// send, an answer — arms reading its reply, inside the gesture (the
-	// audio unlock needs one). A refused send disarms.
+	// audio unlock needs one). A refused send or answer disarms.
 	const send = useCallback(
-		(input: ChatInput, onAccepted?: () => void) => {
-			listenRef.current.controller?.armAutoplay();
-			return sessionSend(input, onAccepted).then((accepted) => {
-				if (!accepted) listenRef.current.controller?.disarmAutoplay();
-				return accepted;
-			});
-		},
+		(input: ChatInput, onAccepted?: () => void) =>
+			startAutoplayTurn(listenRef.current.controller, () => sessionSend(input, onAccepted)),
 		[sessionSend],
 	);
 	const submitAnswer = useCallback(
-		(...args: Parameters<typeof sessionSubmitAnswer>) => {
-			listenRef.current.controller?.armAutoplay();
-			sessionSubmitAnswer(...args);
-		},
+		(...args: Parameters<typeof sessionSubmitAnswer>) =>
+			startAutoplayTurn(listenRef.current.controller, () => sessionSubmitAnswer(...args)),
 		[sessionSubmitAnswer],
 	);
 	useEffect(() => {
@@ -410,7 +405,7 @@ export function Chat({
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
-				listening: listeningRef.current || listenRef.current.controller?.pendingAutoplay === true,
+				listening: listeningRef.current || listenRef.current.keyboard || listenRef.current.controller?.pendingAutoplay === true,
 				pending: pendingRef.current !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
@@ -420,7 +415,7 @@ export function Chat({
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
 			else if (target === "plan") setPlanOpen(false);
-			else if (target === "listen") listenRef.current.controller?.stop();
+			else if (target === "listen") listenRef.current.dismiss();
 			// setup closes itself; null = nothing to do — both claimed.
 		};
 		window.addEventListener("lh:kbd-abort-turn", onAbort);
@@ -1588,7 +1583,7 @@ export function Chat({
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
-															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
+															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} {...listenSourceProps("text", part.id)} className="lh-source-passage">
 																<MessageResponse>{part.text}</MessageResponse>
 															</div>
 														);
@@ -1621,9 +1616,13 @@ export function Chat({
 													case "tool-recall": {
 														// Pending/streaming questions live in the dock, not the
 														// transcript; answered ones render as graded records.
+														// Its owner is the answer, not the call: the reply
+														// to it reads it as new (listen-controller replyBlocks).
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<div key={pi} className="contents" {...listenSourceProps("answer", part.toolCallId)}>
+																	<AnsweredCard answer={part.output as QuestionAnswerData} input={part.input} />
+																</div>
 															);
 														}
 														return null;
@@ -1635,14 +1634,24 @@ export function Chat({
 														// — replaces the retired transcript bottom line. On settling, the
 														// registry's card takes over below.
 														if (part.type.startsWith("tool-") && part.state === "input-streaming") {
-															return <LiveToolCard key={pi} part={part as ArtifactPartProps["part"]} />;
+															return (
+																<div key={pi} className="contents" {...listenSourceProps("call", part.toolCallId)}>
+																	<LiveToolCard part={part as ArtifactPartProps["part"]} />
+																</div>
+															);
 														}
 														// Artifact extension point (contracts.ts): job
 														// parts and future artifacts render via the
 														// registry — add renderers there, not here.
 														if (part.type.startsWith("tool-")) {
 															const Renderer = artifactRenderers[part.type.slice("tool-".length)];
-															if (Renderer) return <Renderer key={pi} part={part as ArtifactPartProps["part"]} />;
+															if (Renderer) {
+																return (
+																	<div key={pi} className="contents" {...listenSourceProps("call", part.toolCallId)}>
+																		<Renderer part={part as ArtifactPartProps["part"]} />
+																	</div>
+																);
+															}
 														}
 														return null;
 													}
@@ -1895,9 +1904,11 @@ export function escAbortTarget(s: {
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
-	/** Something is being read aloud (listen wave, 2026-10-26): Esc stops
-	 *  it — below the overlays (they sit on top of everything), above the
-	 *  question/problem/turn (stopping audio must never dismiss or abort). */
+	/** Something is being read aloud, autoplay
+	 *  is armed, or the player is the focused keyboard surface: Esc stops
+	 *  and leaves it — below the overlays (they sit on top of everything),
+	 *  above the question/problem/turn (stopping audio must never dismiss
+	 *  or abort). */
 	listening: boolean;
 	pending: boolean;
 	/** An active practice problem (practice sessions, 2026-10-04): Esc
@@ -2476,7 +2487,7 @@ function DockOverlay({
 					    child. */}
 					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
 				</div>
-				{/* The listen player (listen wave): anchored to the block's top
+				{/* The listen player: anchored to the block's top
 				    edge like the scroll disc, at the dock column's right — and
 				    one row higher on narrow screens, where the centered disc
 				    would sit under it. */}

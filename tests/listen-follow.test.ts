@@ -11,61 +11,39 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ConcludeCard } from "../components/practice-cards";
+import { ConcludeCard, ThinkingCard } from "../components/practice-cards";
 import { AnsweredCard } from "../components/answered-card";
 import { ProbeDoneCard } from "../components/artifacts/probe-done-card";
 import { buildAnswer } from "../src/core/question-core";
+import { FakeAudio, replaceProperties } from "./helpers/browser";
 
 const { document, window } = parseHTML("<!doctype html><html><body></body></html>");
 
-class FakeAudio {
-	src = "";
-	playbackRate = 1;
-	preservesPitch = true;
-	private listeners = new Map<string, () => void>();
-	addEventListener(type: string, fn: () => void) {
-		this.listeners.set(type, fn);
-	}
-	play() {
-		return Promise.resolve();
-	}
-	pause() {}
-	removeAttribute() {}
-	end() {
-		this.listeners.get("ended")?.();
-	}
-}
-
-const previous = new Map<string, PropertyDescriptor | undefined>();
 let audio: FakeAudio;
+let restore: (() => void)[] = [];
 before(() => {
-	for (const [key, value] of Object.entries({
-		React,
-		document,
-		Node: window.Node,
-		Element: window.Element,
-		Event: window.Event,
-		MutationObserver: window.MutationObserver,
-		localStorage: { getItem: () => null, setItem: () => {} },
-		Audio: class extends FakeAudio {
-			constructor() {
-				super();
-				audio = this;
-			}
-		},
-		fetch: async () => new Response(new Blob(["mp3"])),
-	})) {
-		previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-		Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-	}
-	URL.createObjectURL = () => "blob:clip";
-	URL.revokeObjectURL = () => {};
+	restore = [
+		replaceProperties(globalThis, {
+			React,
+			document,
+			Node: window.Node,
+			Element: window.Element,
+			Event: window.Event,
+			MutationObserver: window.MutationObserver,
+			localStorage: { getItem: () => null, setItem: () => {} },
+			Audio: class extends FakeAudio {
+				constructor() {
+					super();
+					audio = this;
+				}
+			},
+			fetch: async () => new Response(new Blob(["mp3"])),
+		}),
+		replaceProperties(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => {} }),
+	];
 });
 after(() => {
-	for (const [key, descriptor] of previous) {
-		if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-		else delete (globalThis as Record<string, unknown>)[key];
-	}
+	for (const undo of restore) undo();
 });
 
 const { ListenController } = await import("../components/listen/listen-controller.ts");
@@ -135,6 +113,43 @@ describe("follow mode", () => {
 		assert.equal(controller.getSnapshot().status, "waiting");
 	});
 
+	it("Previous leaves a selected block still being written, without reading it early", async () => {
+		controller.setLive(true);
+		add(`<p id="a">One.</p><p id="b">Two, still stre</p>`);
+		controller.playFrom($("b"));
+		await settle();
+		assert.equal(controller.getSnapshot().status, "waiting");
+		controller.prev();
+		await settle();
+		assert.equal(at(controller), "a", "Previous steps from the remembered selection");
+		audio.end();
+		assert.equal(controller.getSnapshot().status, "waiting", "b is still unfinished");
+		controller.setLive(false);
+		await settle();
+		assert.equal(at(controller), "b");
+	});
+
+	it("Previous from a waiting selection a re-render replaced steps from its replacement", async () => {
+		controller.setLive(true);
+		add(`<p id="a">One.</p><p id="b">Two, still stre</p>`);
+		controller.playFrom($("b"));
+		await settle();
+		const copy = document.createElement("p");
+		copy.id = "b-copy";
+		copy.textContent = "Two, still strea";
+		$("b").replaceWith(copy);
+		await settle();
+		assert.equal(controller.getSnapshot().status, "waiting");
+		controller.prev();
+		await settle();
+		assert.equal(at(controller), "a");
+		audio.end();
+		assert.equal(controller.getSnapshot().status, "waiting");
+		controller.setLive(false);
+		await settle();
+		assert.equal(at(controller), "b-copy");
+	});
+
 	it("a block still being written when the turn ends is read then", async () => {
 		controller.setLive(true);
 		add(`<p id="a">One.</p><p id="b">Two</p>`);
@@ -185,6 +200,41 @@ describe("follow mode", () => {
 		assert.equal(controller.activeBlock(), copy);
 		audio.end();
 		assert.equal(at(controller), "b");
+	});
+});
+
+describe("Stop", () => {
+	it("silences the element and cancels synthesis; a response landing afterwards never plays", async (t) => {
+		// Each speech request lands only when the test says so — even after its abort.
+		const requests: { text: string; signal: AbortSignal; land: () => void }[] = [];
+		t.mock.method(globalThis, "fetch", (_url: unknown, init?: RequestInit) => new Promise<Response>((resolve) => {
+			const { parts } = JSON.parse(String(init!.body)) as { parts: { text?: string }[] };
+			requests.push({ text: parts.map((p) => p.text ?? "").join("").trim(), signal: init!.signal!, land: () => resolve(new Response(new Blob(["mp3"]))) });
+		}));
+		let clips = 0;
+		t.mock.method(URL, "createObjectURL", (blob: Blob) => (blob.type === "audio/wav" ? "blob:unlock" : `blob:clip-${++clips}`));
+		add(`<p id="a">One.</p><p id="b">Two.</p>`);
+		controller.playFrom($("old"));
+		requests[0]!.land();
+		await settle();
+		assert.equal(at(controller), "old");
+		assert.deepEqual(requests.map((r) => r.text), ["Earlier reply.", "One."], "the next block prefetches while this one plays");
+		controller.stop();
+		assert.equal(audio.paused, true, "Stop pauses the clip that was playing");
+		assert.equal(audio.src, "", "and releases it");
+		assert.equal(requests[1]!.signal.aborted, true, "the prefetch is cancelled");
+
+		controller.playFrom($("a"));
+		controller.stop();
+		assert.equal(requests[2]!.signal.aborted, true, "a clip still loading is cancelled");
+		controller.playFrom($("b"));
+		requests[2]!.land(); // the stopped read's response arrives anyway
+		await settle();
+		assert.equal(controller.getSnapshot().status, "loading", "still waiting for b's own clip");
+		requests[3]!.land();
+		await settle();
+		assert.equal(at(controller), "b");
+		assert.deepEqual(audio.played.filter((src) => src !== "blob:unlock"), ["blob:clip-1", "blob:clip-3"], "the stopped read's clip never played");
 	});
 });
 
@@ -534,7 +584,13 @@ describe("autoplay", () => {
 });
 
 describe("actual rendered cards in autoplay", () => {
+	/** The learner's thinking rows — the practice one, and the one an
+	 *  answer card lifts above itself — are theirs: never autoplayed. */
 	function practiceCard() {
+		const thinking = renderToStaticMarkup(React.createElement(ThinkingCard, { data: { problemCallId: "problem_1", text: "Carry the one." } }));
+		return thinking + concludeCard();
+	}
+	function concludeCard() {
 		return renderToStaticMarkup(React.createElement(ConcludeCard, { part: {
 			type: "tool-conclude", state: "output-available", toolCallId: "conclude_1",
 			input: { outcome: "solved", verdict: "Correct addition credited." }, reveal: "2 + 3 = 5.",
@@ -545,7 +601,7 @@ describe("actual rendered cards in autoplay", () => {
 			id: "recall_1", kind: "explain", question: "Explain bandwidth-delay product.",
 			mode: "text", options: [], committedAnswer: "Bandwidth times minimum RTT.",
 			createdAt: "2026-10-29T00:00:00.000Z",
-		}, { text: "My attempted answer." }, "recall");
+		}, { text: "My attempted answer.", readingThinking: "Reread the RTT definition." }, "recall");
 		return renderToStaticMarkup(React.createElement(AnsweredCard, { answer }));
 	}
 	function probeCard() {
@@ -599,9 +655,14 @@ describe("actual rendered cards in autoplay", () => {
 		await settle();
 		assert.equal(controller.getSnapshot().block?.textContent?.trim(), "2 + 3 = 5.");
 	});
-	it("explicit reading can start at the teaching answer or probe summary", async () => {
-		add(teachingCard() + probeCard());
-		for (const block of [transcript().querySelector('[data-listen-model-answer]')!, transcript().querySelector('[data-testid="probe-done-card"] p')!]) {
+	it("explicit reading can start at the learner's thinking, the teaching answer or probe summary", async () => {
+		add(practiceCard() + teachingCard() + probeCard());
+		for (const block of [
+			transcript().querySelector('[data-testid="thinking-card"] [data-listen-block]')!,
+			transcript().querySelector('[data-testid="reading-thinking-block"] [data-listen-block]')!,
+			transcript().querySelector('[data-listen-model-answer]')!,
+			transcript().querySelector('[data-testid="probe-done-card"] p')!,
+		]) {
 			controller.playFrom(block);
 			await settle();
 			assert.equal(controller.getSnapshot().block, block);

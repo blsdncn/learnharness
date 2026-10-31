@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
+ * Settings → TTS: the text-to-speech the
  * session's listen affordances read through. Listening is opt-in, and so
  * is reading on from the transcript into the dock's question, and
  * autoplaying replies. The provider (OpenAI, or the TTS custom endpoint)

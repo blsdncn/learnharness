@@ -18,7 +18,8 @@ second pillar of input).
   `{actionId: binding}` merged over defaults. No editor yet — the
   settings milestone owns key map editing.
 - **displayOnly entries**: the registry also lists SURFACE-owned keys
-  (the question dock's row machine) for the cheat sheet only —
+  (the question dock's row machine, the listening surface) for the cheat
+  sheet only —
   `effectiveKeymap` skips them so bare arrows can never leak to pages
   where the surface isn't mounted.
 
@@ -30,14 +31,16 @@ second pillar of input).
   from typing surfaces; bare keys never do).
 - **Esc priority chain**: topmost popover → cheat sheet → cancel
   dictation (DISCARD — the transcript flush is Cmd+D/Stop only, owner
-  round) → stop listening (after session overlays) → abort turn (local stream only — a server-side wake turn has
+  round) → stop listening and leave the focused player (after session
+  overlays) → abort turn (local stream only — a server-side wake turn has
   no client request to abort). Every element/document-level Esc handler
   that acts calls `e.stopPropagation()` so the window chain never
   double-fires. The session search claims Esc to blur back to normal.
-- **Listening**: Esc stops the current reading queue before the pending
-  question or turn abort action. The floating player also offers previous,
-  pause/resume, next, speed, and stop controls. On touch input, tap a reading
-  block to reveal its speaker; a swipe does not reveal it.
+- **Listening**: Esc stops the current reading queue (and an armed
+  autoplay) before the pending question or turn abort action. The floating
+  player also offers previous, pause/resume, next, speed, and stop controls,
+  and ⌘⇧L makes it a keyboard surface (below). On touch input, tap a
+  reading block to reveal its speaker; a swipe does not reveal it.
 - **Focus ring**: browser Tab-focus is gone, so `:focus-visible` stays
   unstyled (an earlier experimental outline was live-rejected — inputs
   showed a red ring on plain click-focus).
@@ -58,6 +61,7 @@ second pillar of input).
 | Jump to graph (home) | ⌘G | router.push in keyboard-shortcuts.tsx |
 | New session | ⌘N | router.push in keyboard-shortcuts.tsx |
 | Rename session | F2 | `lh:kbd-rename-session` (chat.tsx) |
+| Focus listening | ⌘⇧L | `lh:kbd-focus-listening` (listen/listen.tsx) |
 | Cheat sheet | ? | keyboard-shortcuts.tsx |
 | Find (graph: node search) | ⌘F | `lh:kbd-find` (graph-view.tsx; chat transcript search rides the same event when that feature lands) |
 
@@ -99,6 +103,42 @@ While a question is expanded, the dock owns ↑/↓/Space/Enter/Tab:
   without ALSO walking the question rows (owner round 3). The listener
   lives only while the dock is expanded — collapsed, the bar's native
   Enter expands it.
+
+## Listening surface
+
+⌘⇧L (Ctrl+Shift+L elsewhere; registry `focus-listening`, rebindable)
+focuses the session's listening player as a keyboard surface — also from a
+typing field. It does nothing while Listening is off or while a dialog,
+menu, or the cheat sheet is up, never enables Listening, and never starts
+audio. The player shows while focused, even idle, with the hint
+`↑↓ select · Enter read · Space pause · ←→ step · S speed · Esc stop`.
+
+- **Selection** is separate from playback: a muted dashed outline, and a
+  polite status announcing the block's label and the start of its text. It
+  starts on the block reading or waited for; otherwise the first readable
+  transcript block on screen, else the transcript's first, else the dock's
+  first.
+- **↑/↓** select the previous/next readable block — clamped, no audio.
+  Collapsed and technical content is never selectable. Browsing follows
+  the root it started in; with Read the question on, it crosses from the
+  transcript into the dock and back the way a read does, while a start in
+  the dock stays there. An off-screen transcript selection scrolls into
+  view; the dock is never scrolled, opened, or folded.
+- **Enter** is Read from here at the selection (the keypress unlocks audio;
+  an unfinished block waits as a click's read does).
+- **Space** pauses/resumes only while playing or paused.
+- **←/→** are the player's Previous/Next; the selection follows the block
+  they land on, playing or waited for.
+- **S** steps the speed ladder (0.8× … 2×, wrapping), stored on the device.
+- **Esc** is not the surface's own: it rides the Esc chain above — popovers,
+  the cheat sheet, dictation, and session overlays first — then stops
+  playback and an armed autoplay, leaves the surface, and returns focus
+  where it was (else the composer). The question or turn underneath is
+  untouched; the next Esc reaches it.
+- The bare keys act only while focus is inside the player, and stop there —
+  the question rows and Enter-to-submit never also see them. Modifier combos
+  are never the surface's. Clicking or focusing elsewhere leaves the surface
+  without stopping playback. Tab and Shift+Tab keep their global meaning.
 
 ## Status
 

@@ -20,7 +20,7 @@ export default async function ChatPage({
 	// over the settings record, server-read — the same gate home/new read. The
 	// server's 503 stays the truth; this only decides whether the pill rides.
 	const record = readSettingsRecord();
-	// Listening (listen wave, 2026-10-26) is per session: a new chat id
+	// Listening is per session: a new chat id
 	// remounts the provider, which stops anything still reading.
 	return (
 		<ListenProvider key={chat.id} initialSpeech={record?.speech}>

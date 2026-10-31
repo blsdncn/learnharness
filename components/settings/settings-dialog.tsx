@@ -424,13 +424,11 @@ export function SettingsDialogBody({
 								<SettingsSection title="Providers" testid="section-keys">
 									<KeysSection
 										initialRow={initialRow ?? undefined}
-										audio={{
-											tts: {
-												provider: speech?.provider ?? "openai",
-												onProvider: (provider) => writeSpeech({ provider }),
-												customModel: speech?.customModel,
-												onCustomModel: (customModel) => writeSpeech({ customModel }),
-											},
+										tts={{
+											provider: speech?.provider ?? "openai",
+											onProvider: (provider) => writeSpeech({ provider }),
+											customModel: speech?.customModel,
+											onCustomModel: (customModel) => writeSpeech({ customModel }),
 										}}
 									/>
 								</SettingsSection>

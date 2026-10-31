@@ -1,5 +1,5 @@
 /**
- * Listen blocks (listen wave, 2026-10-26): what counts as a block, the
+ * Reading blocks: what counts as a block, the
  * read-from-here order, and what a block says — over markup shaped like
  * the real transcript (Streamdown prose, KaTeX with its TeX annotation,
  * card sections marked data-listen-block, reasoning marked skip).

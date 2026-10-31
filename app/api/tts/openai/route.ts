@@ -1,5 +1,5 @@
 /**
- * Text-to-speech (listen wave, 2026-10-26).
+ * Text-to-speech.
  *
  *   GET  → {configured, keyPresent, custom, baseUrl, model, voice,
  *          readQuestion, autoplay, readModelAnswers} — the listening UI

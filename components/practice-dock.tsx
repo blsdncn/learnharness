@@ -8,6 +8,7 @@ import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
+import { listenSourceProps } from "@/components/listen/speech-dom";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -100,7 +101,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				{/* The statement, rendered but hidden, so "Read the question"
 				    (Settings → TTS) can read a folded problem. */}
 				<div className="invisible h-0 overflow-hidden" data-testid="practice-dock-hidden-problem">
-					<div className="lh-prose text-[15px]" data-listen-block="Problem" data-listen-problem={problemCallId}>
+					<div className="lh-prose text-[15px]" data-listen-block="Problem" data-listen-problem={problemCallId} {...listenSourceProps("call", problemCallId)}>
 						<ToolContentResponse>{input.statement}</ToolContentResponse>
 					</div>
 				</div>
@@ -117,7 +118,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			    (--dock-max-h; the old fixed 40vh cut long problems short). */}
 			<div data-dock-scroll-area="" className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
-				<div className="lh-prose text-[15px]" data-listen-block="Problem" data-listen-problem={problemCallId}>
+				<div className="lh-prose text-[15px]" data-listen-block="Problem" data-listen-problem={problemCallId} {...listenSourceProps("call", problemCallId)}>
 					<ToolContentResponse>{input.statement}</ToolContentResponse>
 				</div>
 			</div>

@@ -81,7 +81,6 @@ describe("audio custom endpoints", () => {
 		assert.deepEqual(record.customTtsProvider?.models, [{ id: "kokoro" }, { id: "whisper-1" }]);
 		assert.equal(record.customTtsProvider?.overrides, undefined, "no chat budget pins");
 		assert.equal(record.customProvider, undefined);
-		assert.equal(record.customProvider, undefined);
 		const stored = auth();
 		assert.equal(stored.CUSTOM_TTS_API_KEY, "tts-only-throwaway-key");
 		assert.equal(JSON.parse(stored.__learnharness_custom_tts_binding!).id, record.customTtsProvider?.credentialBindingId);

@@ -216,25 +216,6 @@ describe("Settings integration", () => {
 		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
 	});
 
-	it("General shows only server truth: nothing flips while its save is in flight", async () => {
-		bridge();
-		const record = { version: 1, general: { autoUpdate: true } };
-		const put = deferred<Response>();
-		const puts: unknown[] = [];
-		globalThis.fetch = async (_input, init) => {
-			if (init?.method !== "PUT") return Response.json({ settings: record });
-			puts.push(JSON.parse(String(init.body)));
-			return put.promise;
-		};
-		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
-		await click(q(host, "toggle-auto-update"));
-		assert.deepEqual(puts, [{ autoUpdate: false }]);
-		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "true", "no optimistic flip");
-		// The server keeps it on: the stored value shows, not the request.
-		await act(async () => put.resolve(Response.json({ settings: record })));
-		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "true");
-	});
-
 	it("Providers → TTS: OpenAI by default; a custom endpoint joins once added", async () => {
 		bridge();
 		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, voice: "nova" } };

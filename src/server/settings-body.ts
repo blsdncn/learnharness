@@ -404,7 +404,7 @@ function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyR
 	return { ok: true, settings: value.trim() };
 }
 
-/** speech (listen wave, 2026-10-26): listening, the voice, reading into
+/** Speech settings: listening, the voice, reading into
  *  the question, autoplay, the provider and the custom endpoint's model.
  *  The endpoint itself connects via /api/tts/custom-endpoint, never here.
  *  Replace-whole, like every section. */

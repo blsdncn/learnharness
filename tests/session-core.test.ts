@@ -909,6 +909,20 @@ describe("answer submission recovery", () => {
 		assert.deepEqual(calls.slice(0, 3), ["/api/chat", "/api/chats/chat_x", "/api/chat"]);
 	});
 
+	it("resolves whether the answer was accepted, as send() does", async () => {
+		const accepting = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") return Response.json({ ok: true });
+			if (String(url).endsWith("/stream")) return sseResponse("[DONE]");
+			return Response.json({ messages: [question, newAnswerResult("q1", "quiz", answer)], turnInFlight: false });
+		} });
+		assert.equal(await accepting.submitAnswer("quiz", "q1", answer), true);
+		const refusing = model({ initialMessages: [question], fetch: async () => new Response("request refused", { status: 500 }) });
+		assert.equal(await refusing.submitAnswer("quiz", "q1", answer), false);
+		assert.equal(refusing.status, "error");
+		const stale = model({ initialMessages: [question], fetch: async () => { throw new Error("must not post"); } });
+		assert.equal(await stale.submitAnswer("quiz", "q1", answer, "another-occurrence"), false, "a render-scoped key that no longer owns the dock");
+	});
+
 	it("retains all submitted draft channels until the canonical answer resolves the call", async () => {
 		const form = { selection: { selected: new Set([1]), otherSelected: true, dontKnow: false }, thinking: "reasoning", other: "custom answer", text: "free text", confidenceIndex: 4 };
 		const m = model({ initialMessages: [question], fetch: async () => { throw new TypeError("offline"); } });

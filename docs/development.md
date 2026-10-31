@@ -178,9 +178,17 @@ pricing-generation step: Pi AI's catalog and public calculator are the authority
 
 **Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server. Settings → Providers → Dictation → Language (below the Deepgram key) offers Nova-3's documented monolingual languages/locales or `language=multi` for automatic multilingual transcription. The app-wide `dictation.language` preference persists through the existing settings record and `PUT /api/settings/dictation`; absent preferences resolve to English (`en`). The settings control locks from connecting through stopping, and reconnects keep the run's original language. A shared preference controller publishes confirmed PUT responses to every reader immediately; the confirmed preference is cached across page navigation and reopening Settings, with no polling or per-recording read. Explicit external dictation-settings notifications invalidate the cache, and capture waits for a successful refresh. Navigating away cancels the run, invalidates pending startup/reconnect work and releases its microphone/socket without appending into another page's input. All other streaming parameters remain unchanged. The picker uses the model dropdown's shared `SearchMenuList` and `MenuShell`: the same fuzzy search, arrow navigation, Enter selection, row styling and scrolling. Its compact mono `SettingsMenuTrigger` is shared with Agent and Appearance; a muted setup line below the key and language rows links the Deepgram Console and states the Member-or-higher key-role requirement.
 
+**Listening (TTS).** Opt-in lesson playback through OpenAI or a custom
+OpenAI-compatible endpoint, with server-held credentials, streamed narration,
+and pointer/keyboard controls. Listening preferences live in Settings → TTS;
+provider/model selection lives in Providers → TTS. See
+[Listening architecture](architecture.md#listening) and
+[keyboard controls](keyboard.md#listening-surface).
+
 ## Testing
 
-All deterministic, no LLM, no network (engines are injected — pi-ai's faux provider scripted per test; `globalThis.fetch` stubbed where transport matters):
+Deterministic tests use no LLM or external service: engines are injected,
+and transport uses fetch stubs or a local HTTP provider.
 
 1. **Pure core units** — merger (via the real fs adapters, backup-and-restored), derivation, coverage, question grading, plan tree, phases, clusters, layout, tool-parts, prices.
 2. **Server flows** — `handleChatRequest` driven end-to-end with scripted engines: persistence, liveness, steer claiming, the wake pipeline (409 retry, quiz deferral, idempotency), crash recovery, the data-dir seam (including a fresh child process).

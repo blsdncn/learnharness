@@ -471,7 +471,7 @@ export interface SpeechSettings {
 	/** Listening is opt-in: unset = off. */
 	enabled?: boolean;
 	voice?: string;
-	/** Read from here continues from the transcript into the dock's open
+	/** Read from here continues from the transcript into the dock's
 	 *  question or practice problem. Unset = off. */
 	readQuestion?: boolean;
 	/** Read the reply to a turn you start as it arrives. Unset = off. */
@@ -527,7 +527,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
-	speech: { voice: string };
+	speech: { enabled: boolean; voice: string; readQuestion: boolean; autoplay: boolean; readModelAnswers: boolean };
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -544,7 +544,8 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
-	speech: { voice: "alloy" },
+	// Listening and its reading options are opt-in (unset = off).
+	speech: { enabled: false, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -880,9 +881,8 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
 		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
 	}
-	for (const key of ["customTtsProvider"] as const) {
-		const value = r[key];
-		if (value !== null && typeof value === "object" && !Array.isArray(value)) out[key] = sanitizeCustomProvider(value as Record<string, unknown>);
+	if (r.customTtsProvider !== null && typeof r.customTtsProvider === "object" && !Array.isArray(r.customTtsProvider)) {
+		out.customTtsProvider = sanitizeCustomProvider(r.customTtsProvider as Record<string, unknown>);
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);

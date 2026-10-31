@@ -52,7 +52,7 @@ describe("escAbortTarget (the layered-Esc ruling)", () => {
 		assert.equal(escAbortTarget({ ...none, mermaidFocus: true, planOpen: true, pending: true }), "mermaid");
 	});
 
-	it("listening (listen wave): Esc stops the audio before dismissing or aborting anything", () => {
+	it("listening: Esc stops the audio before dismissing or aborting anything", () => {
 		assert.equal(escAbortTarget({ ...none, listening: true }), "listen");
 		for (const under of ["pending", "problem", "busy"] as const) {
 			assert.equal(escAbortTarget({ ...none, listening: true, [under]: true }), "listen", `listening outranks ${under}`);

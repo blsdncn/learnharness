@@ -15,6 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ProblemCard } from "../components/practice-cards";
 import { PracticeDock } from "../components/practice-dock";
 import { QuestionDock } from "../components/question-dock";
+import { FakeAudio, replaceProperties } from "./helpers/browser";
 
 const { document, window } = parseHTML(`<!doctype html><html><body>
 <div data-listen-root="transcript"><p id="p1">First.</p><p id="p2">Second.</p></div>
@@ -22,55 +23,30 @@ const { document, window } = parseHTML(`<!doctype html><html><body>
   <div data-listen-block="Options" id="opts"><button>Alpha</button></div></div>
 </body></html>`);
 
-class FakeAudio {
-	src = "";
-	playbackRate = 1;
-	preservesPitch = true;
-	private listeners = new Map<string, () => void>();
-	addEventListener(type: string, fn: () => void) {
-		this.listeners.set(type, fn);
-	}
-	play() {
-		return Promise.resolve();
-	}
-	pause() {}
-	removeAttribute() {}
-	end() {
-		this.listeners.get("ended")?.();
-	}
-}
-
-const previous = new Map<string, PropertyDescriptor | undefined>();
 let audio: FakeAudio;
+let restore: (() => void)[] = [];
 before(() => {
-	for (const [key, value] of Object.entries({
-		React,
-		document,
-		Node: window.Node,
-		Element: window.Element,
-		Event: window.Event,
-		localStorage: { getItem: () => null, setItem: () => {} },
-		Audio: class extends FakeAudio {
-			constructor() {
-				super();
-				audio = this;
-			}
-		},
-		fetch: async () => new Response(new Blob(["mp3"])),
-	})) {
-		previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-		Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-	}
-	URL.createObjectURL = () => "blob:clip";
-	URL.revokeObjectURL = () => {};
+	restore = [
+		replaceProperties(globalThis, {
+			React,
+			document,
+			Node: window.Node,
+			Element: window.Element,
+			Event: window.Event,
+			localStorage: { getItem: () => null, setItem: () => {} },
+			Audio: class extends FakeAudio {
+				constructor() {
+					super();
+					audio = this;
+				}
+			},
+			fetch: async () => new Response(new Blob(["mp3"])),
+		}),
+		replaceProperties(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => {} }),
+	];
 });
-
-
 after(() => {
-	for (const [key, descriptor] of previous) {
-		if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-		else delete (globalThis as Record<string, unknown>)[key];
-	}
+	for (const undo of restore) undo();
 });
 
 const { ListenController } = await import("../components/listen/listen-controller.ts");

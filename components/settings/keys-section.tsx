@@ -30,6 +30,7 @@ import {
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	CUSTOM_PROVIDER,
 	CUSTOM_TTS_KEY_ID,
+	isCustomKeyName,
 	normalizeBaseUrl,
 	OPENAI_AUDIO_KEY_ID,
 	TTS_PATH,
@@ -100,9 +101,6 @@ async function readCustomStatus(inspectKey = false, route = CHAT_ENDPOINT_UI.rou
  *  these ids are the contract). Derived from the catalog (search wave,
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
-/** The TTS custom endpoint's key lives in its own editor,
- *  never listed as rows (like the chat endpoint's key below). */
-const INLINE_KEY_IDS: readonly string[] = [CUSTOM_TTS_KEY_ID];
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
 
 /** The custom endpoint's synthetic Add-provider entry (offered only while unconfigured). */
@@ -143,11 +141,8 @@ export function classifyKeys(
 	const providerRows: AuthKeyStatus[] = [];
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
-		if (isTool(s.id) || INLINE_KEY_IDS.includes(s.id)) continue;
-		// The custom endpoint's key has its OWN home (the Custom endpoint
-		// section), so it never shows here — not as a provider row, not as an
-		// "other stored variable".
-		if (s.id === CUSTOM_PROVIDER.envVar) continue;
+		// Custom keys belong to their endpoint editors, never these rows.
+		if (isTool(s.id) || isCustomKeyName(s.id)) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -397,12 +392,12 @@ export function KeysSection({
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
-	audio,
+	tts,
 }: {
 	initialRow?: string;
 	/** Providers → TTS: the provider choice and custom-endpoint model,
 	 *  owned by the dialog (which owns the record). */
-	audio?: { tts: TtsChoice };
+	tts?: TtsChoice;
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
@@ -659,8 +654,8 @@ export function KeysSection({
 					</p>
 				</>}
 			</SettingsGroup>)}
-			{audio && <SettingsGroup label="TTS" testid="group-tts">
-				<TtsProviders choice={audio.tts} openaiKey={openaiKey} onOpenOpenAIKey={openOpenAIKey} />
+			{tts && <SettingsGroup label="TTS" testid="group-tts">
+				<TtsProviders choice={tts} openaiKey={openaiKey} onOpenOpenAIKey={openOpenAIKey} />
 			</SettingsGroup>}
 
 		</>

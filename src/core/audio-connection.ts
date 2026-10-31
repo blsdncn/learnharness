@@ -25,10 +25,7 @@ export interface AudioConnection {
 	model: string | null;
 }
 
-function audioConnection(custom: boolean, endpoint: CustomProviderSettings | undefined, customModel: string | undefined, defaultModel: string): AudioConnection {
-	if (!custom) return { custom: false, baseUrl: OPENAI_AUDIO_BASE_URL, model: defaultModel };
+export function ttsConnection(provider: "openai" | "custom" | undefined, endpoint: CustomProviderSettings | undefined, customModel: string | undefined): AudioConnection {
+	if (provider !== "custom") return { custom: false, baseUrl: OPENAI_AUDIO_BASE_URL, model: DEFAULT_TTS_MODEL };
 	return { custom: true, baseUrl: endpoint?.baseUrl ?? null, model: customModel ?? null };
 }
-
-export const ttsConnection = (provider: "openai" | "custom" | undefined, endpoint: CustomProviderSettings | undefined, customModel: string | undefined) =>
-	audioConnection(provider === "custom", endpoint, customModel, DEFAULT_TTS_MODEL);

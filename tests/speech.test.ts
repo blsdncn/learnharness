@@ -1,5 +1,5 @@
 /**
- * Speech (listen wave, 2026-10-26): the /api/tts/openai contract, the speech
+ * Speech: the /api/tts/openai contract, the speech
  * settings section, math speech, and the OpenAI-compatible provider call.
  *
  * The routes run framework-free under an isolated LH_DATA_DIR + LH_AUTH_FILE
@@ -20,7 +20,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-speech-"));
 process.env.LH_DATA_DIR = TMP;
 process.env.LH_AUTH_FILE = path.join(TMP, "auth.json");
 
-const { parseSpeechRequest, splitSpokenText, sanitizeUserSettings, resolveSettings, SPEECH_REQUEST_MAX_CHARS } = await import(
+const { parseSpeechRequest, splitSpokenText, sanitizeUserSettings, resolveSettings, SPEECH_REQUEST_MAX_CHARS, SPEECH_ID_MAX } = await import(
 	"../src/core/index.ts"
 );
 const { parseSpeechSettingsBody } = await import("../src/server/settings-body.ts");
@@ -102,14 +102,14 @@ describe("the speech settings section", () => {
 		assert.deepEqual(r?.customProvider, {});
 	});
 	it("resolves to OpenAI unless the custom endpoint is the provider", () => {
-		const openai = { enabled: undefined, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts" };
+		const openai = { enabled: false, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts" };
 		assert.deepEqual(resolveSettings(null).speech, openai);
 		const endpoint = { baseUrl: "http://local.test/v1", models: [{ id: "x" }] };
 		assert.deepEqual(resolveSettings({ version: 1, speech: { customModel: "x" }, customTtsProvider: endpoint }).speech, openai, "connected endpoint unused while OpenAI is the provider");
 		assert.deepEqual(resolveSettings({ version: 1, speech: { provider: "custom", customModel: "x" }, customTtsProvider: endpoint }).speech,
-			{ enabled: undefined, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: true, baseUrl: "http://local.test/v1", model: "x" });
+			{ enabled: false, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: true, baseUrl: "http://local.test/v1", model: "x" });
 		assert.deepEqual(resolveSettings({ version: 1, speech: { provider: "custom" } }).speech,
-			{ enabled: undefined, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: true, baseUrl: null, model: null }, "no endpoint, no model: nothing invented");
+			{ enabled: false, voice: "alloy", readQuestion: false, autoplay: false, readModelAnswers: false, custom: true, baseUrl: null, model: null }, "no endpoint, no model: nothing invented");
 		assert.equal(resolveSettings({ version: 1, speech: { voice: "geffenv1" } }).speech.voice, "geffenv1");
 	});
 	it("PUT parser: the provider and model; the endpoint never rides the section", () => {
@@ -121,6 +121,25 @@ describe("the speech settings section", () => {
 		if (ok.ok) assert.deepEqual(ok.settings, { provider: "custom", customModel: "tts-1", voice: "alloy" });
 		const cleared = parseSpeechSettingsBody({ customModel: "" });
 		assert.deepEqual(cleared, { ok: true, settings: {} });
+	});
+	it("ids are trimmed and kept up to exactly SPEECH_ID_MAX characters; longer or blank ones are refused or dropped", () => {
+		const max = "v".repeat(SPEECH_ID_MAX);
+		for (const key of ["voice", "customModel"] as const) {
+			assert.deepEqual(parseSpeechSettingsBody({ [key]: ` ${max} ` }), { ok: true, settings: { [key]: max } }, `${key}: the limit counts the trimmed id`);
+			assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { [key]: ` ${max} ` } })?.speech, { [key]: max });
+			for (const invalid of [`${max}v`, "   "]) {
+				assert.equal(parseSpeechSettingsBody({ [key]: invalid }).ok, false, `${key}: ${invalid.trim() ? "over the limit" : "blank"}`);
+				assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { [key]: invalid } })?.speech, {});
+			}
+		}
+	});
+	it("every speech field survives the PUT parser, sanitizer and resolution", () => {
+		const speech = { enabled: true, voice: "nova", readQuestion: true, autoplay: true, readModelAnswers: true, provider: "openai", customModel: "tts-1" } as const;
+		assert.deepEqual(parseSpeechSettingsBody(speech), { ok: true, settings: speech });
+		const stored = sanitizeUserSettings({ version: 1, speech });
+		assert.deepEqual(stored?.speech, speech);
+		assert.deepEqual(resolveSettings(stored).speech,
+			{ enabled: true, voice: "nova", readQuestion: true, autoplay: true, readModelAnswers: true, custom: false, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini-tts" });
 	});
 	it("Read the question: off unless saved; booleans only", () => {
 		assert.equal(resolveSettings(null).speech.readQuestion, false);
@@ -151,6 +170,8 @@ describe("the speech settings section", () => {
 	it("preserves explicit activation and rejects invalid activation or endpoint URL secrets", () => {
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { enabled: false } })?.speech, { enabled: false });
 		assert.equal(resolveSettings({ version: 1, speech: { enabled: true } }).speech.enabled, true);
+		assert.equal(resolveSettings({ version: 1, speech: { enabled: false } }).speech.enabled, false);
+		assert.equal(resolveSettings({ version: 1, speech: {} }).speech.enabled, false, "absent resolves off, never undefined");
 		assert.deepEqual(sanitizeUserSettings({ version: 1, speech: { enabled: "true" } })?.speech, {});
 		assert.deepEqual(parseSpeechSettingsBody({ enabled: true }), { ok: true, settings: { enabled: true } });
 		assert.equal(parseSpeechSettingsBody({ enabled: 1 }).ok, false);

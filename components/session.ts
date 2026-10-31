@@ -107,7 +107,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	const steer = useCallback((text: string) => void model.steer(text), [model]);
 	const submitAnswer = useCallback(
 		(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string) =>
-			void model.submitAnswer(tool, toolCallId, output, questionKey),
+			model.submitAnswer(tool, toolCallId, output, questionKey),
 		[model],
 	);
 	const dismissQuestion = useCallback(

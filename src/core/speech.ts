@@ -1,5 +1,5 @@
 /**
- * Speech (listen wave, 2026-10-26): the contract between the listening UI
+ * Speech: the contract between the listening UI
  * and POST /api/tts/openai. Pure, browser-safe.
  *
  * The client sends one listenable BLOCK as parts in reading order: prose

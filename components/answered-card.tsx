@@ -25,7 +25,7 @@ import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const answer = answerForPresentation(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
-	// Compare (listen wave, 2026-10-26): hear your answer, then the committed one.
+	// Compare: hear your answer, then the committed one.
 	const listen = useListen();
 	const yourAnswerRef = useRef<HTMLDivElement>(null);
 	const committedRef = useRef<HTMLDivElement>(null);
