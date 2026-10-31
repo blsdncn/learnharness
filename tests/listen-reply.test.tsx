@@ -347,6 +347,15 @@ describe("autoplay of the reply to a dock answer", () => {
 	});
 });
 
+describe("a refused send", () => {
+	it("disarms autoplay when the session refuses a text turn", async () => {
+		mount(history.slice(0, 3), { post: () => new Response("refused", { status: 500 }) });
+		const accepted = await startAutoplayTurn(controller, () => session.send({ type: "text", text: "What is jitter?" }));
+		assert.equal(accepted, false);
+		assert.equal(controller.pendingAutoplay, false);
+	});
+});
+
 describe("a refused answer", () => {
 	it("disarms autoplay: the question still pending is not read, nor a later turn the learner didn't start", async () => {
 		controller.readQuestion = true;

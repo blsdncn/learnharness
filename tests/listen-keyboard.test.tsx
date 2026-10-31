@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { KeyboardShortcuts } from "../components/keyboard-shortcuts";
-import { ListenPill, ListenProvider, useListen, useListenSnapshot } from "../components/listen/listen";
+import { ListenPill, ListenProvider, useListen } from "../components/listen/listen";
 import type { ListenController } from "../components/listen/listen-controller";
 import { QuestionDock } from "../components/question-dock";
 import { PracticeDock } from "../components/practice-dock";
@@ -35,6 +35,7 @@ describe("the listening keyboard surface", () => {
 	let root: Root;
 	let host: HTMLDivElement;
 	let controller: ListenController | null;
+	let listenApi: ReturnType<typeof useListen>;
 	let prefs: Record<string, unknown>;
 	let spoken: string[];
 	let stored: Map<string, string>;
@@ -106,15 +107,14 @@ describe("the listening keyboard surface", () => {
 	 *  the question and turn stand in as flags; their actions are recorded. */
 	function EscGate() {
 		const listen = useListen();
-		const listening = useListenSnapshot().status !== "idle";
-		const ref = useRef({ listen, listening });
-		ref.current = { listen, listening };
+		const ref = useRef(listen);
+		ref.current = listen;
 		useEffect(() => {
 			const onAbort = () => {
-				const { listen: api, listening: reading } = ref.current;
+				const api = ref.current;
 				const target = escAbortTarget({
 					abortAsk: false, mermaidFocus: false, planOpen: false, setupOpen: false,
-					listening: reading || api.keyboard || api.controller?.pendingAutoplay === true,
+					listening: api.claimsEscape(),
 					pending: gate.pending, problem: false, busy: gate.busy,
 				});
 				escTargets.push(target);
@@ -152,7 +152,8 @@ describe("the listening keyboard surface", () => {
 	let submitted: number;
 
 	function Session({ paragraphs = PARAGRAPHS, answer, question = false, practice, collapsed = true, popup, transcriptKey = "transcript" }: Scene) {
-		controller = useListen().controller;
+		listenApi = useListen();
+		controller = listenApi.controller;
 		const paragraph = (p: NonNullable<Scene["paragraphs"]>[number]) => p.source
 			? <div key={p.key ?? p.id} data-source-message-id={p.source} {...listenSourceProps("text", p.part)}><p id={p.id}>{p.text}</p></div>
 			: <p key={p.key ?? p.id} id={p.id}>{p.text}</p>;
@@ -242,6 +243,33 @@ describe("the listening keyboard surface", () => {
 		host.remove();
 		frames.clear();
 		setDictationActive(false);
+	});
+
+	it("defaults to no Escape claim without a provider", async () => {
+		function Probe() { listenApi = useListen(); return null; }
+		await act(async () => root.render(<Probe />));
+		assert.equal(listenApi.claimsEscape(), false);
+		assert.equal(await listenApi.startTurn(() => Promise.resolve(true)), true);
+	});
+
+	it("claims live arms and idle surfaces, and disarms refused turns", async () => {
+		await mount();
+		controller!.autoplay = true;
+		controller!.armAutoplay();
+		assert.equal(listenApi.claimsEscape(), true);
+		controller!.disarmAutoplay();
+		assert.equal(await listenApi.startTurn(() => {
+			assert.equal(controller!.pendingAutoplay, true);
+			return Promise.resolve(false);
+		}), false);
+		assert.equal(controller!.pendingAutoplay, false);
+		await focusListening();
+		assert.equal(reading().status, "idle");
+		assert.equal(listenApi.claimsEscape(), true);
+		listenApi.dismiss();
+		await act(async () => controller!.playFrom($("#t1")!));
+		assert.notEqual(reading().status, "idle");
+		assert.equal(listenApi.claimsEscape(), true);
 	});
 
 	it("Cmd/Ctrl+Shift+L from the composer focuses the idle player without speaking", async () => {

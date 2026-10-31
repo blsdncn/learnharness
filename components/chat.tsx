@@ -84,8 +84,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
-import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
-import { startAutoplayTurn } from "@/components/listen/listen-controller";
+import { ListenPill, useListen } from "@/components/listen/listen";
 import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR, listenSourceProps } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -380,9 +379,6 @@ export function Chat({
 	// underneath is dismissed or aborted — and leave the focused player
 	// (Cmd/Ctrl+Shift+L), even idle, without touching the question or turn.
 	const listen = useListen();
-	const listening = useListenSnapshot().status !== "idle";
-	const listeningRef = useRef(false);
-	listeningRef.current = listening;
 	const listenRef = useRef(listen);
 	listenRef.current = listen;
 	// AUTOPLAY (Settings → TTS): every turn the learner starts here — a
@@ -390,12 +386,12 @@ export function Chat({
 	// audio unlock needs one). A refused send or answer disarms.
 	const send = useCallback(
 		(input: ChatInput, onAccepted?: () => void) =>
-			startAutoplayTurn(listenRef.current.controller, () => sessionSend(input, onAccepted)),
+			listenRef.current.startTurn(() => sessionSend(input, onAccepted)),
 		[sessionSend],
 	);
 	const submitAnswer = useCallback(
 		(...args: Parameters<typeof sessionSubmitAnswer>) =>
-			startAutoplayTurn(listenRef.current.controller, () => sessionSubmitAnswer(...args)),
+			listenRef.current.startTurn(() => sessionSubmitAnswer(...args)),
 		[sessionSubmitAnswer],
 	);
 	useEffect(() => {
@@ -405,7 +401,7 @@ export function Chat({
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
-				listening: listeningRef.current || listenRef.current.keyboard || listenRef.current.controller?.pendingAutoplay === true,
+				listening: listenRef.current.claimsEscape(),
 				pending: pendingRef.current !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,

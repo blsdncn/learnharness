@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { isTypingSurface, kbdEventForAction, type SpeechSettings } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useSettingsSaved } from "@/components/settings-signal";
-import { LISTEN_RATES, ListenController, type ListenSnapshot } from "./listen-controller";
+import { LISTEN_RATES, ListenController, startAutoplayTurn, type ListenSnapshot } from "./listen-controller";
 import { LISTEN_ROOT_ATTR, adjacentAcross, adjacentBlock, blockFor, blockLabel, blocksIn, dockRoot, isCollapsed, rootOf, anchorFor, connectedRoot, resolveAnchor, type ListenAnchor } from "./speech-dom";
 
 /** The keyboard surface while focused: the selected block (apart from
@@ -53,14 +53,14 @@ interface Surface {
 interface ListenApi {
 	controller: ListenController | null;
 	configured: boolean;
-	/** The keyboard surface (Cmd/Ctrl+Shift+L) holds focus. */
-	keyboard: boolean;
+	claimsEscape: () => boolean;
+	startTurn: (start: () => Promise<boolean>) => Promise<boolean>;
 	/** Esc on listening: stop reading and an armed autoplay, and leave the
 	 *  keyboard surface, giving focus back. */
 	dismiss: () => void;
 }
 
-const ListenContext = createContext<ListenApi>({ controller: null, configured: false, keyboard: false, dismiss: () => {} });
+const ListenContext = createContext<ListenApi>({ controller: null, configured: false, claimsEscape: () => false, startTurn: (start) => start(), dismiss: () => {} });
 /** What the player needs to be the keyboard surface (listen.tsx only). */
 const SurfaceContext = createContext<{
 	surface: Surface | null;
@@ -75,7 +75,7 @@ export function useListen(): ListenApi {
 
 const IDLE: ListenSnapshot = { status: "idle", block: null, label: "", position: null, rate: 1, error: null };
 
-export function useListenSnapshot(): ListenSnapshot {
+function useListenSnapshot(): ListenSnapshot {
 	const { controller } = useListen();
 	return useSyncExternalStore(
 		controller?.subscribe ?? (() => () => {}),
@@ -294,8 +294,9 @@ export function ListenProvider({ children, initialSpeech }: { children: ReactNod
 		return () => window.removeEventListener(kbdEventForAction("focus-listening"), onFocus);
 	}, [controller, configured, leave]);
 
-	const keyboard = surface !== null;
-	const api = useMemo(() => ({ controller, configured, keyboard, dismiss }), [controller, configured, keyboard, dismiss]);
+	const claimsEscape = useCallback(() => (controller !== null && controller.getSnapshot().status !== "idle") || surfaceRef.current !== null || controller?.pendingAutoplay === true, [controller]);
+	const startTurn = useCallback((start: () => Promise<boolean>) => startAutoplayTurn(controller, start), [controller]);
+	const api = useMemo(() => ({ controller, configured, dismiss, claimsEscape, startTurn }), [controller, configured, dismiss, claimsEscape, startTurn]);
 	const surfaceApi = useMemo(() => ({ surface, element, select, leave }), [surface, select, leave]);
 	return (
 		<ListenContext.Provider value={api}>
