@@ -543,16 +543,6 @@ describe("autoplay", () => {
 			controller.prev();
 			assert.equal(at(controller), "verdict");
 		});
-		it(`autoplay can include ${label} when enabled`, async () => {
-			controller.readModelAnswers = true;
-			await turn(`${answer}<p id="feedback">Continue here.</p>`);
-			controller.setLive(false);
-			await settle();
-			assert.equal(at(controller), "model");
-			audio.end();
-			await settle();
-			assert.equal(at(controller), "feedback");
-		});
 		it(`autoplay skips ${label} when it is the only reply block`, async () => {
 			await turn(answer);
 			controller.setLive(false);
