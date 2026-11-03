@@ -320,7 +320,7 @@ export class ListenController {
 			this.audio.addEventListener("ended", () => {
 				if (this.snapshot.status !== "playing") return;
 				const next = this.neighbor(1);
-				if (next && this.ready(next)) this.goTo(next);
+				if (next && (this.queue?.kind === "list" || this.ready(next))) this.goTo(next);
 				else if (this.following()) this.wait();
 				else this.halt();
 			});
@@ -362,7 +362,7 @@ export class ListenController {
 	 *  (markdown streams in order) or the turn has ended. A read crossing
 	 *  from the transcript into the dock waits for the turn's end. */
 	private ready(block: Element): boolean {
-		if (!this.live || this.queue?.kind === "list") return true;
+		if (!this.live) return true;
 		const root = rootOf(block);
 		if (root?.getAttribute(LISTEN_ROOT_ATTR) === "transcript") return adjacentBlock(block, root, 1) !== null;
 		const q = this.queue;
@@ -521,7 +521,7 @@ export class ListenController {
 				if (session !== this.session) return;
 				this.set({ status: "playing" });
 				const next = this.neighbor(1);
-				if (next && this.ready(next)) {
+				if (next && (this.queue?.kind === "list" || this.ready(next))) {
 					keep.add(next);
 					void this.clip(next).catch(() => {}); // prefetch; a failure resurfaces when reached
 				}

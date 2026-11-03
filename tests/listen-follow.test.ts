@@ -293,6 +293,27 @@ describe("autoplay", () => {
 		await settle();
 	}
 
+	it("Compare preserves an armed reply until its first streaming block finishes", async () => {
+		add('<p id="correct">The committed answer.</p>');
+		controller.armAutoplay();
+		controller.setLive(true);
+		controller.playList([$("old"), $("correct")]);
+		await settle();
+		add('<p id="reply">Feedback still streaming.</p>');
+		await settle();
+		assert.equal(controller.pendingAutoplay, true, "Compare cannot finish the reply's block");
+		audio.end();
+		await settle();
+		assert.equal(at(controller), "correct");
+		audio.end();
+		await settle();
+		assert.equal(controller.getSnapshot().status, "idle");
+		assert.equal(controller.pendingAutoplay, true);
+		add('<p>More feedback.</p>');
+		await settle();
+		assert.equal(at(controller), "reply", "the finished reply still autoplays after Compare");
+	});
+
 	it("reads the reply from its first finished block, skipping your own row", async () => {
 		await turn(`<p id="r1">Reply one.</p>`);
 		assert.equal(controller.getSnapshot().status, "idle", "r1 is still being written");
