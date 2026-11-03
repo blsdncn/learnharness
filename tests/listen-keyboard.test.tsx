@@ -333,6 +333,7 @@ describe("the listening keyboard surface", () => {
 
 	it("Compare answers reads the learner's answer, then the committed one, as one list", async () => {
 		await mount({ answer: EXPLAIN });
+		await act(async () => controller!.setLive(true));
 		await act(async () => ($('[data-testid="listen-compare"]') as HTMLButtonElement).click());
 		await settle();
 		assert.deepEqual(spoken, ["“My attempt.”", "The answer: Bandwidth times round-trip time."], "the committed answer prefetches");

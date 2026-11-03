@@ -362,7 +362,7 @@ export class ListenController {
 	 *  (markdown streams in order) or the turn has ended. A read crossing
 	 *  from the transcript into the dock waits for the turn's end. */
 	private ready(block: Element): boolean {
-		if (!this.live) return true;
+		if (!this.live || this.queue?.kind === "list") return true;
 		const root = rootOf(block);
 		if (root?.getAttribute(LISTEN_ROOT_ATTR) === "transcript") return adjacentBlock(block, root, 1) !== null;
 		const q = this.queue;
