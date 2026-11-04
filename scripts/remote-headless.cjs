@@ -12,6 +12,9 @@ const { randomBytes } = require("node:crypto");
 const { once } = require("node:events");
 const { createRemoteAccess } = require("../electron/remote-access.cjs");
 const { attachRemoteChild } = require("../electron/remote-child.cjs");
+const { attachChatGPTChild } = require("../electron/chatgpt-ipc.cjs");
+const { attachSubscriptionChild } = require("../electron/subscription-ipc.cjs");
+const { createHeadlessChatGPT } = require("./headless-chatgpt.cjs");
 
 const root = path.resolve(__dirname, "..");
 const stateDir = process.env.LH_REMOTE_STATE_DIR || path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "learnharness");
@@ -19,6 +22,10 @@ const socketPath = process.env.LH_REMOTE_CONTROL_SOCKET || path.join(process.env
 
 function parseCommand(args) {
 	const [op, id, ...extra] = args;
+	if (["chatgpt-status", "chatgpt-login", "chatgpt-cancel", "chatgpt-complete", "chatgpt-models"].includes(op)) {
+		if (extra.length || (op === "chatgpt-login" ? id !== undefined && typeof id !== "string" : id !== undefined)) throw new Error("Unexpected ChatGPT command arguments.");
+		return { op, ...(id ? { id } : {}) };
+	}
 	if (!["status", "pair", "enable", "disable", "revoke"].includes(op) || extra.length || (op === "revoke" ? typeof id !== "string" || !id : id !== undefined))
 		throw new Error("Usage: remote-headless.cjs serve | status | pair | enable | disable | revoke <device-id>");
 	return { op, ...(id ? { id } : {}) };
@@ -45,13 +52,13 @@ async function runCommand(command) {
 				} catch (error) { reject(error); }
 			});
 		});
-		request.setTimeout(35_000, () => request.destroy(new Error("Local control request timed out.")));
+		request.setTimeout(50_000, () => request.destroy(new Error("Local control request timed out.")));
 		request.on("error", reject);
 		request.end(JSON.stringify(command));
 	});
 }
 
-async function serve({ createRemote = createRemoteAccess, serverEntry = path.join(root, ".next/standalone/server.js") } = {}) {
+async function serve({ createRemote = createRemoteAccess, createChat = createHeadlessChatGPT, serverEntry = path.join(root, ".next/standalone/server.js") } = {}) {
 	if (process.platform === "win32") throw new Error("The headless launcher requires Unix sockets.");
 	privateDirectory(stateDir);
 	privateDirectory(path.dirname(socketPath));
@@ -67,7 +74,7 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 	let desired = true;
 	if (fs.existsSync(statePath)) desired = JSON.parse(fs.readFileSync(statePath, "utf8")).enabled === true;
 	const remote = createRemote({ upstream, desktopSecret, statePath });
-	let child, relay, control, retry;
+	let child, relay, chatRelay, nativeRelay, chat, control, retry;
 	let ownsSocket = false;
 	let stopping;
 	const shutdown = () => stopping ||= (async () => {
@@ -77,6 +84,9 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 		control?.close();
 		control?.closeAllConnections();
 		relay?.dispose();
+		chatRelay?.dispose();
+		nativeRelay?.dispose();
+		chat?.connection.close();
 		try { await remote.shutdown(); }
 		finally {
 			if (child && child.exitCode === null && child.signalCode === null) {
@@ -94,6 +104,8 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 	process.once("SIGTERM", onSignal);
 	process.once("SIGINT", onSignal);
 	try {
+		chat = createChat({ directory: stateDir, onChange: (packet) => chatRelay?.send(packet) });
+		await chat.connection.status();
 		child = fork(serverEntry, [], {
 			execArgv: [],
 			cwd: path.dirname(serverEntry),
@@ -108,6 +120,10 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 			if (!stopping) { console.error("Backend exited; stopping the remote gateway."); process.exitCode = 1; onSignal(); }
 		});
 		relay = attachRemoteChild(child, remote);
+		chatRelay = attachChatGPTChild(child, chat.connection);
+		// Other desktop subscriptions remain unavailable, with an immediate
+		// reply rather than making the model catalog wait for an IPC timeout.
+		nativeRelay = attachSubscriptionChild(child, null);
 		const deadline = Date.now() + 60_000;
 		let ready = false;
 		while (!stopping && Date.now() < deadline) {
@@ -129,10 +145,18 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 				let body = "";
 				for await (const chunk of request) {
 					body += chunk;
-					if (Buffer.byteLength(body) > 4096) return reply(413, { error: "Local command too large." });
+					if (Buffer.byteLength(body) > 12_288) return reply(413, { error: "Local command too large." });
 				}
 				const raw = JSON.parse(body);
 				const command = parseCommand([raw.op, ...(raw.id === undefined ? [] : [raw.id])]);
+				if (command.op === "chatgpt-status") return reply(200, await chat.connection.status());
+				if (command.op === "chatgpt-models") return reply(200, await chat.connection.models());
+				if (command.op === "chatgpt-login") return reply(200, await chat.login(command.id));
+				if (command.op === "chatgpt-cancel") return reply(200, chat.cancel());
+				if (command.op === "chatgpt-complete") {
+					if (typeof raw.callback !== "string") return reply(400, { error: "A callback URL is required through private input." });
+					return reply(200, await chat.complete(raw.callback));
+				}
 				if (command.op === "enable") desired = true;
 				if (command.op === "disable") desired = false;
 				reply(200, await remote.control(command));
@@ -164,7 +188,16 @@ async function serve({ createRemote = createRemoteAccess, serverEntry = path.joi
 
 if (require.main === module) {
 	const args = process.argv.slice(2);
-	const operation = args.length === 1 && args[0] === "serve" ? serve() : Promise.resolve().then(() => runCommand(parseCommand(args))).then((value) => {
+	const operation = args.length === 1 && args[0] === "serve" ? serve() : Promise.resolve().then(async () => {
+		const command = parseCommand(args);
+		if (command.op === "chatgpt-complete") {
+			if (process.stdin.isTTY) throw new Error("Provide the callback URL on stdin through a private file; never pass it as an argument.");
+			let input = "";
+			for await (const chunk of process.stdin) { input += chunk; if (Buffer.byteLength(input) > 8192) throw new Error("Callback input too large."); }
+			command.callback = input.trim();
+		}
+		return runCommand(command);
+	}).then((value) => {
 		console.log(JSON.stringify(value, null, 2));
 		if (value.error) process.exitCode = 1;
 	});

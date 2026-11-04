@@ -2,8 +2,9 @@
 
 `scripts/remote-headless.cjs` starts the production standalone server and
 the existing authenticated Tailscale gateway without Electron. It supports
-API-key providers, TTS, dictation, learning sessions and the graph. Desktop
-subscription sign-in is unavailable. The host must join the same tailnet
+API-key providers, TTS, dictation, learning sessions and the graph. ChatGPT
+uses the private IPC bridge and manual sign-in handoff described below.
+Other desktop subscriptions remain unavailable. The host must join the same tailnet
 as the browsers that will access it.
 
 Build the payload with `npm run build` and `node scripts/build-server.mjs`.
@@ -43,6 +44,44 @@ crash, ensure the old process is gone before removing a stale socket.
 The supervisor stops its gateway and backend together. systemd's
 `KillMode=control-group` also removes children after an ungraceful exit.
 
+## ChatGPT subscription from a phone
+
+The supervisor owns a mode-0600 `chatgpt-credentials.json` in
+`LH_REMOTE_STATE_DIR`. The existing OAuth owner handles PKCE, ID-token
+verification, account identity, scopes and token refresh. Credentials
+reach only the backend through inherited IPC. Background use preserves
+the existing preference, enabled by default.
+
+```sh
+learnharness-remote chatgpt-login
+learnharness-remote chatgpt-status
+learnharness-remote chatgpt-models
+learnharness-remote chatgpt-cancel
+```
+
+Open the returned `authorizationUrl` on the phone. After authorization,
+its browser will fail to load `http://127.0.0.1:<port>/auth/callback?...`,
+because that listener is on the VPS. Supply the full failed address
+through private input and complete the attempt using stdin:
+
+```sh
+learnharness-remote chatgpt-complete < /path/to/private-callback-file
+```
+
+Never use a command argument or shared log for that address: it contains
+a one-use OAuth code. The handoff accepts only the exact pending loopback
+scheme, host, port, path and state, rejects duplicate OAuth parameters,
+and never follows redirects. The normal OAuth owner performs all final
+verification. Attempts expire after ten minutes. Do not restart the
+service while signing in.
+
+This manual relay is app-specific, distinct from OpenAI's documented
+[credential-transfer procedure for VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms).
+Actual account eligibility must still be verified. After completion,
+refresh the app and select a ChatGPT model in its model picker. The
+desktop-only Providers sign-in controls do not manage this headless
+account; administration stays on the local CLI.
+
 ## Paths and configuration
 
 - `PORT`: backend loopback port, default 3000.
@@ -76,6 +115,29 @@ without an interactive login. Tailscale 1.104.5 is installed under
 The supervisor uses the durable Node runtime at
 `~/.local/lib/learnharness/node`. The existing checkout data and auth paths
 remain in use. Fonts and fontconfig are installed in the user's home.
+
+### Speechify audio service
+
+`speechifyd.service` runs `blsdncn/speechifyd` from
+`~/.local/share/speechifyd`, listening only on `127.0.0.1:47616`.
+LearnHarness's two custom audio endpoints use
+`http://127.0.0.1:47616/v1`, its private API key and its `speechify` model.
+Existing language, voice and reading preferences are preserved. Speechify
+maps unsupported voice names to its default, initially `geffenv1`.
+
+Account login uses the authenticated `/v1/session` route over loopback.
+Passwords arrive through private input and are not saved. The service
+keeps only its refresh token in `~/.local/state/speechifyd/refresh-token`;
+its API key is in that same private directory. Speechify's upstream
+account API is unofficial, as documented by its repository.
+
+FFmpeg 8.0.1 and its runtime dependencies were downloaded from Ubuntu's
+package archive, checked against package-metadata SHA-256 hashes and
+extracted into `~/.local/lib/learnharness-ffmpeg/`. The launcher at
+`~/.local/bin/ffmpeg` supplies its private library paths. The speechifyd
+unit override includes that launcher in `PATH`; LearnHarness wants the
+speechifyd service at boot. No system packages or public listeners were
+added.
 
 The Tailscale service uses `--tun=userspace-networking` and an explicit `--statedir` (required for
 TLS certificate storage), private state in

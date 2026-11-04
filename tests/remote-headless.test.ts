@@ -66,6 +66,12 @@ http.createServer((req,res) => {
 	assert.equal(statSync(socketPath).mode & 0o777, 0o600);
 	assert.equal((await fetch(host.upstream + "/api/settings")).status, 403);
 	assert.equal((await runCommand({ op: "status" })).enabled, true);
+	const chatgpt = await runCommand({ op: "chatgpt-status" });
+	assert.equal(chatgpt.available, true);
+	assert.equal(chatgpt.allowBackgroundUse, true);
+	assert.deepEqual(chatgpt.accounts, []);
+	assert.equal("authorizationUrl" in chatgpt, false);
+	await assert.rejects(runCommand({ op: "chatgpt-complete", callback: "http://127.0.0.1:99/auth/callback?code=synthetic" }), /No ChatGPT sign-in/);
 	assert.equal((await gateway("/api/settings")).status, 401);
 	const pair = await runCommand({ op: "pair" });
 	const grant = new URLSearchParams(new URL(pair.pairingUrl).hash.slice(1)).get("grant");
