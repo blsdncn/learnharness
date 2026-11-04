@@ -1,5 +1,8 @@
 # Phone and private browser access
 
+For a Linux server without Electron or a display, see
+[headless private remote access](remote-headless.md).
+
 The packaged desktop app can serve its full existing web UI over Tailscale:
 sessions, teaching and practice, the knowledge graph, background activity,
 settings, and model selection all use the same running desktop backend.
