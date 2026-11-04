@@ -77,7 +77,8 @@ The supervisor uses the durable Node runtime at
 `~/.local/lib/learnharness/node`. The existing checkout data and auth paths
 remain in use. Fonts and fontconfig are installed in the user's home.
 
-The Tailscale service uses `--tun=userspace-networking`, private state in
+The Tailscale service uses `--tun=userspace-networking` and an explicit `--statedir` (required for
+TLS certificate storage), private state in
 `~/.local/state/learnharness-tailscale/`, and a private socket at
 `/run/user/1000/learnharness-tailscale/tailscaled.sock`. It does not change
 the system VPN, DNS, SSH, or the T3 connection. To authorize the VPS:
