@@ -53,6 +53,7 @@ import { dictationConnection, ttsConnection, type AudioConnection } from "./audi
  *  supports; owner, 2026-09-22). A slot is CONFIGURED iff its model is
  *  present; a level-only slot is inert (kept on disk, resolved as null). */
 export interface EffectiveSlot {
+	cacheRetention?: ModelSlot["cacheRetention"];
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
@@ -99,8 +100,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Unset enabled = off; the connection is OpenAI unless the custom endpoint is the provider. */
-	speech: { enabled: boolean | undefined; voice: string; readQuestion: boolean; autoplay: boolean } & AudioConnection;
+	/** Absent options resolve to the factory (listening off); the connection is OpenAI unless the custom endpoint is the provider. */
+	speech: { enabled: boolean; voice: string; readQuestion: boolean; autoplay: boolean; readModelAnswers: boolean } & AudioConnection;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
@@ -142,7 +143,10 @@ export function resolveRoleSpec(role: ModelRole, record: UserSettings | null): E
  *  to ride without the factory floor). */
 export function resolveSlot(slot: ModelSlot | undefined): EffectiveSlot | null {
 	if (!slot?.model) return null;
-	return { provider: slot.model.provider, id: slot.model.id, thinkingLevel: slot.thinkingLevel };
+	return {
+		provider: slot.model.provider, id: slot.model.id, thinkingLevel: slot.thinkingLevel,
+		...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
+	};
 }
 
 /** Resolve one role's spec — the BYOK chain (owner 2026-09-22): role
@@ -233,10 +237,11 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
 		},
 		speech: {
-			enabled: record?.speech?.enabled,
+			enabled: record?.speech?.enabled ?? FACTORY_SETTINGS.speech.enabled,
 			voice: record?.speech?.voice ?? FACTORY_SETTINGS.speech.voice,
-			readQuestion: record?.speech?.readQuestion ?? false,
-			autoplay: record?.speech?.autoplay ?? false,
+			readQuestion: record?.speech?.readQuestion ?? FACTORY_SETTINGS.speech.readQuestion,
+			autoplay: record?.speech?.autoplay ?? FACTORY_SETTINGS.speech.autoplay,
+			readModelAnswers: record?.speech?.readModelAnswers ?? FACTORY_SETTINGS.speech.readModelAnswers,
 			...ttsConnection(record?.speech?.provider, record?.customTtsProvider, record?.speech?.customModel),
 		},
 		customProvider: {

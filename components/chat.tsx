@@ -21,9 +21,10 @@ import { BrailleSpinner } from "@/components/braille-spinner";
 import { LiveToolCard } from "@/components/artifacts/live-tool-card";
 import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
+import { MalformedQuestion } from "@/components/malformed-question";
 import { artifactRenderers } from "@/components/artifacts";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
-import { Composer } from "@/components/composer";
+import { ChatSessionComposer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -73,6 +74,7 @@ import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
 	pendingQuestionOf,
+	malformedQuestionsOf,
 	dismissedAnswer,
 	endsInFailedTurn,
 	findPendingToolCall,
@@ -84,8 +86,8 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
-import { ListenPill, useListen, useListenSnapshot } from "@/components/listen/listen";
-import { LISTEN_ENTER_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
+import { ListenPill, useListen } from "@/components/listen/listen";
+import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR, listenSourceProps } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -375,32 +377,23 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
-	// Listening claims Esc too (listen wave): stop reading before anything
-	// underneath is dismissed or aborted.
+	// Listening claims Esc too: stop reading before anything
+	// underneath is dismissed or aborted — and leave the focused player
+	// (Cmd/Ctrl+Shift+L), even idle, without touching the question or turn.
 	const listen = useListen();
-	const listening = useListenSnapshot().status !== "idle";
-	const listeningRef = useRef(false);
-	listeningRef.current = listening;
 	const listenRef = useRef(listen);
 	listenRef.current = listen;
 	// AUTOPLAY (Settings → TTS): every turn the learner starts here — a
 	// send, an answer — arms reading its reply, inside the gesture (the
-	// audio unlock needs one). A refused send disarms.
+	// audio unlock needs one). A refused send or answer disarms.
 	const send = useCallback(
-		(input: ChatInput, onAccepted?: () => void) => {
-			listenRef.current.controller?.armAutoplay();
-			return sessionSend(input, onAccepted).then((accepted) => {
-				if (!accepted) listenRef.current.controller?.disarmAutoplay();
-				return accepted;
-			});
-		},
+		(input: ChatInput, onAccepted?: () => void) =>
+			listenRef.current.startTurn(() => sessionSend(input, onAccepted)),
 		[sessionSend],
 	);
 	const submitAnswer = useCallback(
-		(...args: Parameters<typeof sessionSubmitAnswer>) => {
-			listenRef.current.controller?.armAutoplay();
-			sessionSubmitAnswer(...args);
-		},
+		(...args: Parameters<typeof sessionSubmitAnswer>) =>
+			listenRef.current.startTurn(() => sessionSubmitAnswer(...args)),
 		[sessionSubmitAnswer],
 	);
 	useEffect(() => {
@@ -410,7 +403,7 @@ export function Chat({
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
-				listening: listeningRef.current,
+				listening: listenRef.current.claimsEscape(),
 				pending: pendingRef.current !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
@@ -420,7 +413,7 @@ export function Chat({
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
 			else if (target === "plan") setPlanOpen(false);
-			else if (target === "listen") listenRef.current.controller?.stop();
+			else if (target === "listen") listenRef.current.dismiss();
 			// setup closes itself; null = nothing to do — both claimed.
 		};
 		window.addEventListener("lh:kbd-abort-turn", onAbort);
@@ -481,6 +474,7 @@ export function Chat({
 	}, []);
 
 	const pending = findPendingToolCall(messages, pendingQuestionOf(nativeMessages));
+	const malformedQuestions = malformedQuestionsOf(nativeMessages);
 	// The abort handler reads the pending question from a ref (the window
 	// listener is mount-scoped; the value it needs is render-scoped).
 	const pendingRef = useRef(pending);
@@ -554,7 +548,7 @@ export function Chat({
 	 * thinking while reading the teaching prose, mounted while a check waits
 	 * behind its reveal, riding the check answer (or its dismissal) as the
 	 * separate `readingThinking` field. Reset per pending question. */
-	const [readingThinking, setReadingThinking] = useState("");
+	const [readingThinkingSeed, setReadingThinkingSeed] = useState({ questionId: null as string | null, value: "", revision: 0 });
 	const readingThinkingRef = useRef("");
 
 	// ⌘T (toggle-user-thinking, owner round 2026-10-07): set EVERY user
@@ -567,19 +561,22 @@ export function Chat({
 	}, []);
 	const applyReadingThinking = useCallback((v: string) => {
 		readingThinkingRef.current = v;
-		setReadingThinking(v);
 	}, []);
 	const clearReadingThinking = useCallback(() => {
 		readingThinkingRef.current = "";
-		setReadingThinking("");
+		setReadingThinkingSeed((previous) => ({ ...previous, value: "", revision: previous.revision + 1 }));
 	}, []);
 	const pendingQuestionId = pending?.key ?? null;
-	useEffect(() => {
+	useLayoutEffect(() => {
 		// Different calls never share a draft; a failed submission of THIS
 		// call restores the reading channel alongside the form's snapshot.
-		const reading = pendingQuestionId ? questionDraft(pendingQuestionId)?.readingThinking ?? "" : "";
-		readingThinkingRef.current = reading;
-		setReadingThinking(reading);
+		const value = pendingQuestionId ? questionDraft(pendingQuestionId)?.readingThinking ?? "" : "";
+		readingThinkingRef.current = value;
+		setReadingThinkingSeed((previous) =>
+			previous.questionId === pendingQuestionId && previous.value === value
+				? previous
+				: { questionId: pendingQuestionId, value, revision: previous.revision + 1 },
+		);
 	}, [pendingQuestionId, questionDraft]);
 
 	// The phase at every message (one linear fold): the transcript draws a
@@ -587,15 +584,17 @@ export function Chat({
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 
-	const [text, setText] = useState("");
-	/* The composer's value MIRROR ("nothing gets lost" round, owner
-	 * 2026-10-01): a dictation flush lands via setState, which a closure
-	 * waiting through `await finish()` cannot observe in time. Kept
-	 * current at every write site via applyText. */
+	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
+	/* The composer draft ref is synchronous, so sends and dictation flushes
+	 * read the latest text without a parent render per input event. Explicit
+	 * resets still bump a revision so the local field can sync. */
 	const textRef = useRef("");
 	const applyText = useCallback((v: string) => {
 		textRef.current = v;
-		setText(v);
+		setComposerDraftRevision((revision) => revision + 1);
+	}, []);
+	const recordComposerText = useCallback((v: string) => {
+		textRef.current = v;
 	}, []);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
@@ -780,8 +779,7 @@ export function Chat({
 	// recovers from it. Later compaction requires new input instead.
 	const retryable = (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
-	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+	const sendAllowed = !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -1588,7 +1586,7 @@ export function Chat({
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
-															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
+															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} {...listenSourceProps("text", part.id)} className="lh-source-passage">
 																<MessageResponse>{part.text}</MessageResponse>
 															</div>
 														);
@@ -1619,11 +1617,22 @@ export function Chat({
 													case "tool-ask_user_question":
 													case "tool-explain":
 													case "tool-recall": {
+														const malformed = !busy && malformedQuestions.find(call => call.messageId === part.sourceMessageId && call.contentIndex === part.sourceContentIndex && call.toolCallId === part.toolCallId);
+														if (malformed) return <MalformedQuestion key={pi} disabled={!!pending || compacting}
+															reason={pending ? "Answer or discard the remaining question first." : undefined}
+															onRetry={() => {
+																draftRef.current = null;
+																void send({ type: "retry-question", messageId: malformed.messageId, contentIndex: malformed.contentIndex, toolCallId: malformed.toolCallId });
+															}} />;
 														// Pending/streaming questions live in the dock, not the
 														// transcript; answered ones render as graded records.
+														// Its owner is the answer, not the call: the reply
+														// to it reads it as new (listen-controller replyBlocks).
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<div key={pi} className="contents" {...listenSourceProps("answer", part.toolCallId)}>
+																	<AnsweredCard answer={part.output as QuestionAnswerData} input={part.input} />
+																</div>
 															);
 														}
 														return null;
@@ -1635,14 +1644,24 @@ export function Chat({
 														// — replaces the retired transcript bottom line. On settling, the
 														// registry's card takes over below.
 														if (part.type.startsWith("tool-") && part.state === "input-streaming") {
-															return <LiveToolCard key={pi} part={part as ArtifactPartProps["part"]} />;
+															return (
+																<div key={pi} className="contents" {...listenSourceProps("call", part.toolCallId)}>
+																	<LiveToolCard part={part as ArtifactPartProps["part"]} />
+																</div>
+															);
 														}
 														// Artifact extension point (contracts.ts): job
 														// parts and future artifacts render via the
 														// registry — add renderers there, not here.
 														if (part.type.startsWith("tool-")) {
 															const Renderer = artifactRenderers[part.type.slice("tool-".length)];
-															if (Renderer) return <Renderer key={pi} part={part as ArtifactPartProps["part"]} />;
+															if (Renderer) {
+																return (
+																	<div key={pi} className="contents" {...listenSourceProps("call", part.toolCallId)}>
+																		<Renderer part={part as ArtifactPartProps["part"]} />
+																	</div>
+																);
+															}
 														}
 														return null;
 													}
@@ -1726,7 +1745,8 @@ export function Chat({
 					plan={hasPlan ? <PlanMarginalia messages={messages} /> : undefined}
 					onOpenPlan={() => setPlanOpen(true)}
 					requiresReveal={requiresReveal}
-					readingThinking={readingThinking}
+					readingThinking={readingThinkingSeed.value}
+					readingThinkingRevision={readingThinkingSeed.revision}
 					onReadingThinking={applyReadingThinking}
 					phase={phases.at(-1) ?? "probe"}
 					turns={turns}
@@ -1756,18 +1776,20 @@ export function Chat({
 						)
 					}
 					composer={
-						<Composer
+						<ChatSessionComposer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
 							// abort channel kills it server-side; stop() alone would
 							// only detach our view.
 							busy={busy}
-							value={text}
-							onChange={applyText}
+							value={textRef.current}
+							revision={composerDraftRevision}
+							onChange={recordComposerText}
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
-							canSend={canSend}
+							sendAllowed={sendAllowed}
+							dictationActive={dictation.active}
 							onEscape={dictation.active ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
@@ -1895,9 +1917,11 @@ export function escAbortTarget(s: {
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
-	/** Something is being read aloud (listen wave, 2026-10-26): Esc stops
-	 *  it — below the overlays (they sit on top of everything), above the
-	 *  question/problem/turn (stopping audio must never dismiss or abort). */
+	/** Something is being read aloud, autoplay
+	 *  is armed, or the player is the focused keyboard surface: Esc stops
+	 *  and leaves it — below the overlays (they sit on top of everything),
+	 *  above the question/problem/turn (stopping audio must never dismiss
+	 *  or abort). */
 	listening: boolean;
 	pending: boolean;
 	/** An active practice problem (practice sessions, 2026-10-04): Esc
@@ -1959,6 +1983,7 @@ function DockOverlay({
 	onSubmitThinking,
 	requiresReveal,
 	readingThinking,
+	readingThinkingRevision,
 	onReadingThinking,
 	phase,
 	turns,
@@ -1994,6 +2019,7 @@ function DockOverlay({
 	/** The reading-thinking draft (owner 2026-10-03) — owned by ChatView so
 	 *  the submit + dismissal seams (outside this overlay) can merge it. */
 	readingThinking: string;
+	readingThinkingRevision: number;
 	onReadingThinking: (v: string) => void;
 	/** Session phase at the pending question — scales the thinking field. */
 	phase: Phase3;
@@ -2246,20 +2272,6 @@ function DockOverlay({
 	};
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
-	// READ THE QUESTION (Settings → TTS): reading crossed from the
-	// transcript into a folded dock. At the bottom, open it the way the bar
-	// does (dictation finishes first); scrolled up, it stays folded and is
-	// read hidden — never a forced scroll.
-	useEffect(() => {
-		const onEnterDock = () => {
-			if (expandedRef.current || !atBottomRef.current) return;
-			void finishDictation().then((ok) => {
-				if (ok) expandAndRevealRef.current();
-			});
-		};
-		document.addEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
-		return () => document.removeEventListener(LISTEN_ENTER_DOCK_EVENT, onEnterDock);
-	}, []);
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
 	// invitation or collapsed by scroll — Enter is never dead. Any live
@@ -2406,6 +2418,7 @@ function DockOverlay({
 					{pending && requiresReveal && (
 						<ReadingThinkingField
 							value={readingThinking}
+							revision={readingThinkingRevision}
 							onChange={onReadingThinking}
 							onEscape={dictationCancel}
 							onOpen={
@@ -2490,7 +2503,7 @@ function DockOverlay({
 					    child. */}
 					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
 				</div>
-				{/* The listen player (listen wave): anchored to the block's top
+				{/* The listen player: anchored to the block's top
 				    edge like the scroll disc, at the dock column's right — and
 				    one row higher on narrow screens, where the centered disc
 				    would sit under it. */}

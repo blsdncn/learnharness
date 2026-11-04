@@ -735,7 +735,7 @@ export class SessionModel {
 				// flow parses them. Retry's 400s are ordinary user-facing
 				// guidance, so show their error text without JSON syntax.
 				let message = (await res.text()) || `The send failed (${res.status}).`;
-				if (input.type === "retry" && res.status === 400) {
+				if ((input.type === "retry" || input.type === "retry-question") && res.status === 400) {
 					try {
 						const refusal = JSON.parse(message) as { error?: unknown } | null;
 						if (typeof refusal?.error === "string" && refusal.error.length > 0) message = refusal.error;
@@ -834,10 +834,10 @@ export class SessionModel {
 	}
 
 	/** The answer path (the dock): the answer IS the question call's tool
-	 *  result (fork 1), riding as its input event. */
-	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string): Promise<void> {
+	 *  result (fork 1), riding as its input event. Resolves as send() does. */
+	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string): Promise<boolean> {
 		void tool;
-		return this.send({ type: "answer", toolCallId, answer: output }, undefined, questionKey).then(() => undefined);
+		return this.send({ type: "answer", toolCallId, answer: output }, undefined, questionKey);
 	}
 
 	/** The dismissal path (owner design 2026-10-03, "A2"): the skipped

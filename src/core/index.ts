@@ -18,6 +18,9 @@
 export * from "./contracts.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
+export * from "./source-organization.ts";
+export * from "./source-selection.ts";
+export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
 export * from "./question-core.ts";
@@ -78,6 +81,7 @@ export * from "./session-navigation.ts";
 // shape rules + masking — pure, browser-safe (the auth page binds to the
 // /api/keys routes built on it).
 export * from "./auth-keys.ts";
+export { isCustomKeyName } from "./custom-provider-auth.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
 export * from "./coverage.ts";

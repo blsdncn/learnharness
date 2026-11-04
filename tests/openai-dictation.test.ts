@@ -17,7 +17,7 @@ const request = (body: Blob, contentType = "audio/wav") => new Request("http://l
 
 describe("OpenAI dictation audio", () => {
 	it("allows the full bounded recording through the Next proxy", () => {
-		assert.equal(nextConfig.experimental?.proxyClientMaxBodySize, MAX_DICTATION_WAV_BYTES);
+		assert.ok(Number(nextConfig.experimental?.proxyClientMaxBodySize) >= MAX_DICTATION_WAV_BYTES);
 	});
 	it("encodes all PCM frames in a mono 16 kHz WAV", async () => {
 		const blob = makeWav();

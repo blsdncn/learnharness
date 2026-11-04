@@ -5,21 +5,24 @@ import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { ListenProvider, useListen } from "../components/listen/listen";
 import type { ListenController } from "../components/listen/listen-controller";
+import { SETTINGS_SAVED_EVENT } from "../components/settings-signal";
+import { replaceProperties } from "./helpers/browser";
 
 /** Mount the actual overlay: touch release includes the non-hovering
  * pointer's leave event, which used to arm the mouse's hide timer. */
 describe("listening pointer lifetimes", () => {
 	const dom = parseHTML("<html><body></body></html>");
-	const previous = new Map<string, PropertyDescriptor | undefined>();
+	let restore = () => {};
 	const frames = new Map<number, FrameRequestCallback>();
 	let frameId = 0;
 	let root: Root;
 	let host: HTMLDivElement;
 	let controller: ListenController | null;
+	let readModelAnswers: boolean;
 	let createRoot: typeof import("react-dom/client").createRoot;
 
 	before(async () => {
-		for (const [key, value] of Object.entries({
+		restore = replaceProperties(globalThis, {
 			React,
 			window: dom.window,
 			document: dom.document,
@@ -28,30 +31,23 @@ describe("listening pointer lifetimes", () => {
 			Node: dom.window.Node,
 			IS_REACT_ACT_ENVIRONMENT: true,
 			localStorage: { getItem: () => null },
-			fetch: async () => Response.json({ configured: true }),
+			fetch: async () => Response.json({ configured: true, readModelAnswers }),
 			requestAnimationFrame: (callback: FrameRequestCallback) => {
 				frames.set(++frameId, callback);
 				return frameId;
 			},
 			cancelAnimationFrame: (id: number) => frames.delete(id),
-		})) {
-			previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-			Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-		}
+		});
 		({ createRoot } = await import("react-dom/client"));
 	});
-	after(() => {
-		for (const [key, descriptor] of previous) {
-			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-			else delete (globalThis as Record<string, unknown>)[key];
-		}
-	});
+	after(() => restore());
 
 	function Content() {
 		controller = useListen().controller;
 		return <div data-listen-root="transcript"><p>Read this paragraph.</p></div>;
 	}
 	beforeEach(async () => {
+		readModelAnswers = false;
 		host = document.createElement("div");
 		document.body.append(host);
 		root = createRoot(host);
@@ -81,6 +77,26 @@ describe("listening pointer lifetimes", () => {
 	function tap(target: Element) {
 		dispatch(target, "pointerdown", "touch");
 		dispatch(target, "pointerup", "touch");
+	}
+
+	it("the listening controller receives the saved model-answer preference immediately", async () => {
+		assert.equal(controller!.readModelAnswers, false);
+		for (const enabled of [true, false]) {
+			readModelAnswers = enabled;
+			await act(async () => {
+				window.dispatchEvent(new dom.window.CustomEvent(SETTINGS_SAVED_EVENT, { detail: { section: "speech" } }));
+			});
+			assert.equal(controller!.readModelAnswers, enabled);
+		}
+	});
+
+	for (const left of [100, 32, 12, 0]) {
+		it(`floats to the left without switching sides at block x=${left}`, () => {
+			paragraph().getBoundingClientRect = () => ({ left, right: left + 200, top: 80, height: 24, width: 200 }) as DOMRect;
+			dispatch(paragraph(), "pointerover", "mouse");
+			frame();
+			assert.equal(speaker().style.transform, `translate(${Math.max(0, left - 28)}px, 80px)`);
+		});
 	}
 
 	it("touch release leaves time to press the speaker, then playback clears it", (t) => {

@@ -114,3 +114,56 @@ test("the chat endpoint's form names its own path, keeping its pins", async () =
 	assert.ok(q("custom-pins"));
 	assert.equal(q("group-tts"), null, "audio groups need the dialog's choices");
 });
+
+for (const prefix of ["", "tts-"]) test(`Escape closes the TTS model menu before the ${prefix || "chat"} endpoint editor`, async () => {
+	globalThis.fetch = (async (input: string) => {
+		if (String(input).includes("custom")) return Response.json({ baseUrl: "http://endpoint.test/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "voice-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"1"' } });
+		return Response.json({ keys: [], providers: [] });
+	}) as typeof fetch;
+	// linkedom does not order capture listeners ahead of React's root.
+	// Run the real registered document-capture handlers first, as a browser does.
+	const capture = new Set<EventListenerOrEventListenerObject>();
+	const add = document.addEventListener;
+	const remove = document.removeEventListener;
+	document.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+		if (type === "keydown" && options === true) capture.add(listener);
+		else add.call(this, type, listener, options);
+	};
+	document.removeEventListener = function (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) {
+		if (type === "keydown" && options === true) capture.delete(listener);
+		else remove.call(this, type, listener, options);
+	};
+	const host = document.createElement("div");
+	document.body.appendChild(host);
+	const root = createRoot(host);
+	cleanup = async () => {
+		try { await act(async () => root.unmount()); }
+		finally {
+			document.addEventListener = add;
+			document.removeEventListener = remove;
+			host.remove();
+		}
+	};
+	const escape = async (target: HTMLElement) => act(async () => {
+		const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+		Object.defineProperty(event, "key", { value: "Escape" });
+		let stopped = false;
+		const stop = event.stopPropagation.bind(event);
+		event.stopPropagation = () => { stopped = true; stop(); };
+		for (const listener of [...capture]) {
+			if (typeof listener === "function") listener.call(document, event);
+			else listener.handleEvent(event);
+		}
+		if (!stopped) target.dispatchEvent(event);
+	});
+	await act(async () => root.render(<KeysSection audio={{ dictation: { provider: "deepgram", onProvider() {}, customModel: undefined, onCustomModel() {} }, tts: { provider: "custom", onProvider() {}, customModel: "voice-model", onCustomModel() {} } }} />));
+	await click(`${prefix}custom-endpoint-row-btn`);
+	await click("tts-custom-model");
+	assert.ok(q(`${prefix}custom-endpoint-editor`));
+	assert.ok(q("tts-custom-model-menu"));
+	await escape(element("tts-custom-model-search"));
+	assert.equal(q("tts-custom-model-menu"), null, "the topmost menu closes first");
+	assert.ok(q(`${prefix}custom-endpoint-editor`), "the editor underneath stays open");
+	await escape(element(`${prefix}custom-baseurl-input`));
+	assert.equal(q(`${prefix}custom-endpoint-editor`), null, "the next Escape folds the editor");
+});

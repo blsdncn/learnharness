@@ -322,6 +322,7 @@ export function SettingsDialogBody({
 		[onAppearanceChange],
 	);
 
+
 	return (
 		<div
 			role="dialog"
@@ -492,7 +493,7 @@ export function SettingsDialogBody({
 								<SettingsSection title="TTS" testid="section-speech">
 									<SpeechSection
 										speech={record.speech}
-										onSectionChange={(next: SpeechSettings) => void write("speech", next)}
+										onChange={(patch: Partial<SpeechSettings>) => void write("speech", (current) => ({ ...current, ...patch }))}
 										onOpenProviders={() => setActive("keys")}
 									/>
 								</SettingsSection>

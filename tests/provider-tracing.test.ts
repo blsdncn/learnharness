@@ -61,7 +61,7 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 			"node_modules/bignumber.js/**/*",
 		]);
 	});
-	it("math speech ships exactly the English locale data it loads (listen wave)", () => {
+	it("math speech ships exactly the English locale data it loads", () => {
 		const included = picomatch(nextConfig.outputFileTracingIncludes!["*"]!, { dot: true });
 		for (const file of ["base", "en"]) assert.equal(included(`node_modules/speech-rule-engine/lib/mathmaps/${file}.json`), true, file);
 		for (const file of ["de", "fr", "nemeth"]) assert.equal(included(`node_modules/speech-rule-engine/lib/mathmaps/${file}.json`), false, file);

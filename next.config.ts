@@ -1,14 +1,17 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 import { MAX_DICTATION_WAV_BYTES } from "./src/core/dictation.ts";
+import { MAX_IMPORT_BODY_BYTES } from "./lib/notes-import-limits.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
 const nextConfig: NextConfig = {
-	// Proxy buffering must accommodate a bounded WAV before route validation.
-	experimental: { proxyClientMaxBodySize: MAX_DICTATION_WAV_BYTES },
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
+	// Leave multipart headroom above the 25 MiB file allowance. This is a
+	// proxy buffer, not a rejection gate: the import route also bounds reads,
+	// validates actual file bytes and handles incomplete multipart bodies.
+	experimental: { proxyClientMaxBodySize: Math.max(MAX_IMPORT_BODY_BYTES, MAX_DICTATION_WAV_BYTES) },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).
@@ -96,7 +99,7 @@ const nextConfig: NextConfig = {
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
-			// Listen wave (2026-10-26): math speech's engine reads its locale
+			// Math speech's engine reads its locale
 			// data via a runtime path (lib/mathmaps/<locale>.json) the tracer
 			// cannot see. Only the two files the English setup loads.
 			"node_modules/speech-rule-engine/lib/mathmaps/{base,en}.json",

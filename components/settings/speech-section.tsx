@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Settings → TTS (listen wave, 2026-10-26): the text-to-speech the
+ * Settings → TTS: the text-to-speech the
  * session's listen affordances read through. Listening is opt-in, and so
  * is reading on from the transcript into the dock's question, and
  * autoplaying replies. The provider (OpenAI, or the TTS custom endpoint)
@@ -9,31 +9,27 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { resolveSettings, type SpeechSettings } from "@/src/core";
+import { resolveSettings, type SpeechSettings, type SpeechStatus } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { CommitInput, SettingsRow, Toggle } from "./controls";
 
 /** GET /api/tts/openai's readiness fields this page reads. */
-interface SpeechReadiness {
-	configured: boolean;
-	keyPresent: boolean;
-	custom: boolean;
-	baseUrl: string | null;
-	model: string | null;
-}
+type SpeechReadiness = Pick<SpeechStatus, "configured" | "keyPresent" | "custom" | "baseUrl" | "model">;
+
+const FIELD_ROW = "flex-col items-stretch gap-2 @xl/speech:flex-row @xl/speech:items-center @xl/speech:gap-4";
 
 const SAMPLE = "This is how LearnHarness will read to you.";
-// Follow the content pane's width: the settings sidebar also takes space
-// at tablet sizes, so a viewport breakpoint alone would still crowd fields.
-const FIELD_ROW = "flex-col items-stretch gap-2 @xl/speech:flex-row @xl/speech:items-center @xl/speech:gap-4";
 
 export function SpeechSection({
 	speech,
-	onSectionChange,
+	onChange,
 	onOpenProviders,
 }: {
 	speech: SpeechSettings | undefined;
-	onSectionChange: (next: SpeechSettings) => void;
+	/** One edit: only the fields it changes, so edits made faster than
+	 *  the saves return never overwrite each other (the dialog applies
+	 *  them in order to the saved section). */
+	onChange: (patch: Partial<SpeechSettings>) => void;
 	/** Open Providers (its TTS group holds the provider and endpoint). */
 	onOpenProviders: () => void;
 }) {
@@ -150,37 +146,43 @@ export function SpeechSection({
 				<Toggle
 					checked={speech?.enabled ?? status?.configured ?? false}
 					disabled={status === null}
-					onChange={(enabled) => onSectionChange({ ...speech, enabled })}
+					onChange={(enabled) => onChange({ enabled })}
 					label="Listening"
 				/>
 			</SettingsRow>
-			<SettingsRow label="Read the question" hint="Read from here continues into the open question or problem" testid="speech-row-read-question">
+			<SettingsRow label="Read the question" hint="Read from here continues into the open question or problem. In practice mode, autoplay reads the dock problem once, when first asked." testid="speech-row-read-question">
 				<Toggle
 					checked={speech?.readQuestion ?? false}
-					onChange={(readQuestion) => onSectionChange({ ...speech, readQuestion })}
+					onChange={(readQuestion) => onChange({ readQuestion })}
 					label="Read the question"
 				/>
 			</SettingsRow>
 			<SettingsRow label="Autoplay replies" hint="Read the agent's reply aloud as it arrives, for turns you start" testid="speech-row-autoplay">
 				<Toggle
 					checked={speech?.autoplay ?? false}
-					onChange={(autoplay) => onSectionChange({ ...speech, autoplay })}
+					onChange={(autoplay) => onChange({ autoplay })}
 					label="Autoplay replies"
 				/>
 			</SettingsRow>
-			<SettingsRow
-				label="Voice"
-				hint="The server's voice id"
-				testid="speech-row-voice"
-				className={FIELD_ROW}
-			>
+			{/* A sub-option of autoplay: indented under it. */}
+			<div className="pl-4">
+				<SettingsRow label="Read model answers" hint="Include model answers and practice solutions in autoplay" testid="speech-row-read-model-answers" dimmed={!resolved.autoplay}>
+					<Toggle
+						checked={resolved.readModelAnswers}
+						disabled={!resolved.autoplay}
+						onChange={(readModelAnswers) => onChange({ readModelAnswers })}
+						label="Read model answers"
+					/>
+				</SettingsRow>
+			</div>
+			<SettingsRow label="Voice" hint="The server's voice id" testid="speech-row-voice" className={FIELD_ROW}>
 				<CommitInput
 					value={speech?.voice ?? ""}
 					placeholder={resolved.voice}
 					ariaLabel="speech voice"
 					testid="input-speech-voice"
 					className="w-full @xl/speech:w-40 @xl/speech:shrink-0"
-					onCommit={(voice) => onSectionChange({ ...speech, voice: voice || undefined })}
+					onCommit={(voice) => onChange({ voice: voice || undefined })}
 				/>
 			</SettingsRow>
 			<SettingsRow

@@ -23,11 +23,13 @@ import type {
 	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
+	ModelSlot,
 	RoleModelOverride,
 	SpeechSettings,
 } from "../core/settings.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
+	CACHE_RETENTIONS,
 	COMPACTION_THRESHOLD_FLOOR,
 	CUSTOM_MODEL_PIN_FLOOR,
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
@@ -368,7 +370,15 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
 		if (!parsed.override.model) {
 			return { ok: false, error: `slot "${key}" must set a model (thinkingLevel alone cannot run — absent slot = unset)` };
 		}
-		settings[key as (typeof MODEL_SLOTS)[number]] = parsed.override;
+		const slot: ModelSlot = parsed.override;
+		const retention = (raw[key] as Record<string, unknown>).cacheRetention;
+		if (retention !== undefined) {
+			if (!CACHE_RETENTIONS.some((value) => value === retention)) {
+				return { ok: false, error: `${key}.cacheRetention must be none, short, or long` };
+			}
+			slot.cacheRetention = retention as ModelSlot["cacheRetention"];
+		}
+		settings[key as (typeof MODEL_SLOTS)[number]] = slot;
 	}
 	return { ok: true, settings };
 }
@@ -410,7 +420,7 @@ function parseSpeechId(raw: Record<string, unknown>, key: string): SettingsBodyR
 	return { ok: true, settings: value.trim() };
 }
 
-/** speech (listen wave, 2026-10-26): listening, the voice, reading into
+/** Speech settings: listening, the voice, reading into
  *  the question, autoplay, the provider and the custom endpoint's model.
  *  The endpoint itself connects via /api/tts/custom-endpoint, never here.
  *  Replace-whole, like every section. */
@@ -422,7 +432,7 @@ export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<Speec
 		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
 		settings.enabled = raw.enabled;
 	}
-	for (const key of ["readQuestion", "autoplay"] as const) {
+	for (const key of ["readQuestion", "autoplay", "readModelAnswers"] as const) {
 		if (raw[key] === undefined) continue;
 		if (typeof raw[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
 		settings[key] = raw[key];

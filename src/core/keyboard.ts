@@ -36,7 +36,16 @@ export type KeyAction =
 	| "question-pick-row"
 	| "question-submit"
 	| "open-settings"
-	| "toggle-user-thinking";
+	| "toggle-user-thinking"
+	| "focus-listening"
+	| "listening-select-prev"
+	| "listening-select-next"
+	| "listening-read"
+	| "listening-pause"
+	| "listening-prev-block"
+	| "listening-next-block"
+	| "listening-speed"
+	| "listening-stop";
 
 /** Where the cheat sheet groups an action (display only — dispatch is
  *  global; a seam that isn't mounted simply no-ops). */
@@ -49,7 +58,7 @@ export interface KeyActionDef {
 	scope: KeyScope;
 	binding: string;
 	/** Display-only (cheat sheet) — contextual keys a SURFACE owns (the
-	 *  question dock's row machine); never dispatched from the registry,
+	 *  question dock's row machine or listening player); never dispatched from the registry,
 	 *  so they can't leak to pages where the surface isn't mounted. */
 	displayOnly?: boolean;
 }
@@ -69,6 +78,10 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "new-session", label: "New session", scope: "global", binding: "mod+n" },
 	{ id: "rename-session", label: "Rename session", scope: "chat", binding: "f2" },
 	{ id: "toggle-user-thinking", label: "Toggle all your thinking", scope: "chat", binding: "mod+t" },
+	// Listening: the shortcut focuses the session's
+	// player as a keyboard surface — Listening must be on; it never starts
+	// audio by itself. The surface then owns the bare keys below.
+	{ id: "focus-listening", label: "Focus listening", scope: "chat", binding: "mod+shift+l" },
 	// Mod+F is surface-scoped: graph node search and session text Find share
 	// one action/binding. Only the currently mounted surface listens.
 	{ id: "find", label: "Find", scope: "global", binding: "mod+f" },
@@ -85,6 +98,16 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "question-prev-row", label: "Question · previous row", scope: "chat", binding: "arrowup", displayOnly: true },
 	{ id: "question-pick-row", label: "Question · pick row", scope: "chat", binding: "space", displayOnly: true },
 	{ id: "question-submit", label: "Question · submit", scope: "chat", binding: "enter", displayOnly: true },
+	// The listening surface's keys — displayOnly like the dock's: they act
+	// only while focus is inside the focused player (components/listen).
+	{ id: "listening-select-prev", label: "Listening · select previous block", scope: "chat", binding: "arrowup", displayOnly: true },
+	{ id: "listening-select-next", label: "Listening · select next block", scope: "chat", binding: "arrowdown", displayOnly: true },
+	{ id: "listening-read", label: "Listening · read from selection", scope: "chat", binding: "enter", displayOnly: true },
+	{ id: "listening-pause", label: "Listening · pause / resume", scope: "chat", binding: "space", displayOnly: true },
+	{ id: "listening-prev-block", label: "Listening · previous block", scope: "chat", binding: "arrowleft", displayOnly: true },
+	{ id: "listening-next-block", label: "Listening · next block", scope: "chat", binding: "arrowright", displayOnly: true },
+	{ id: "listening-speed", label: "Listening · change speed", scope: "chat", binding: "s", displayOnly: true },
+	{ id: "listening-stop", label: "Listening · stop and leave", scope: "chat", binding: "escape", displayOnly: true },
 ];
 
 const STORAGE_KEY = "lh:keymap";
@@ -147,6 +170,9 @@ export function bindingForAction(id: KeyAction): string {
  * Normalize a KeyboardEvent to a canonical binding string. Rules:
  * - mod matches BOTH meta (⌘) and ctrl — Ctrl+K works on a Mac keyboard too.
  * - a printable key ("?") bakes its shift in: "shift+/?" collapses to "?".
+ * - with mod or alt held, a single non-ASCII character falls back to its
+ *   physical A–Z/comma position (Russian Ctrl+"л" → mod+k). ASCII characters
+ *   keep following `key`, including AZERTY/Dvorak mappings.
  */
 export function eventBinding(e: KeyboardEvent): string {
 	const mod = e.metaKey || e.ctrlKey;
@@ -159,7 +185,19 @@ export function eventBinding(e: KeyboardEvent): string {
 	if (mod) mods.push("mod");
 	if (e.altKey) mods.push("alt");
 	if (e.shiftKey) mods.push("shift");
-	return [...mods, e.key.toLowerCase()].join("+");
+	return [...mods, modifiedKey(e)].join("+");
+}
+
+/** The key part of a modified binding. A non-ASCII `key` (the layout's own
+ *  letter) falls back to `code` — KeyK → "k", Comma → "," — the only keys the
+ *  registry binds by character. */
+function modifiedKey(e: KeyboardEvent): string {
+	const key = e.key.toLowerCase();
+	// Inspect the reported character: lowercasing can expand it (İ → i̇).
+	if (e.key.length !== 1 || e.key <= "\x7f" || !(e.metaKey || e.ctrlKey || e.altKey)) return key;
+	if (e.code === "Comma") return ",";
+	const letter = /^Key([A-Z])$/.exec(e.code);
+	return letter?.[1] ? letter[1].toLowerCase() : key;
 }
 
 /** The window event name a registry action dispatches/answers on —

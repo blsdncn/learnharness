@@ -168,6 +168,43 @@ describe("General update rows", () => {
 		assert.equal(b.calls.check, 0);
 	});
 
+	for (const version of ["0.3.8", null]) {
+		it(`dismisses ${version ?? "an unnamed update"} without installing, keeps Settings available, and shows a new version`, async () => {
+			const b = bridge(state({ status: "downloaded", version, revision: 1 }));
+			const host = await mount(<><UpdateSettings {...props} /><UpdateBanner /></>);
+			const dismiss = host.querySelector<HTMLElement>("[aria-label='Dismiss update notification']");
+			await click(dismiss);
+			assert.equal(q(host, "update-banner"), null);
+			assert.equal(b.calls.install, 0, "dismiss must not restart or install");
+			assert.equal(b.calls.check, 0, "dismiss must not check for updates");
+
+			await b.push(state({ status: "downloaded", version, revision: 2 }));
+			assert.equal(q(host, "update-banner"), null, "repeated status must stay dismissed");
+			await click(q(host, "update-restart"));
+			assert.equal(b.calls.install, 1, "Settings still offers installation");
+
+			await b.push(state({ status: "downloaded", version: "0.4.0", revision: 3 }));
+			assert.ok(q(host, "update-banner")!.textContent!.includes("0.4.0"));
+		});
+	}
+
+	it("dismissal survives status transitions but is forgotten when the banner remounts", async () => {
+		const b = bridge(state({ status: "downloaded", version: "0.4.1", revision: 1 }));
+		const host = await mount(<UpdateBanner />);
+		await click(host.querySelector("[aria-label='Dismiss update notification']"));
+		await b.push(state({ status: "checking", revision: 2 }));
+		await b.push(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		assert.equal(q(host, "update-banner"), null, "the same staged version stays hidden");
+
+		const { root } = roots.pop()!;
+		await act(async () => { root.unmount(); });
+		host.remove();
+		assert.equal(b.listeners.size, 0);
+		bridge(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		const reopened = await mount(<UpdateBanner />);
+		assert.ok(q(reopened, "update-banner"), "dismissal is local state, not a persisted preference");
+	});
+
 	it("a delayed older snapshot cannot overwrite a newer push in Settings or the banner", async () => {
 		const snapshot = deferred<UpdateState>(); const b = bridge(state(), snapshot.promise);
 		const host = await mount(<><UpdateSettings {...props} /><UpdateBanner /></>);
@@ -324,6 +361,102 @@ describe("Settings integration", () => {
 		await click(q(host, "tts-custom-model"));
 		await click(q(document, "tts-custom-model-option-kokoro")!);
 		assert.deepEqual(puts.at(-1), ["speech", { enabled: true, voice: "nova", provider: "custom", customModel: "kokoro" }]);
+	});
+
+	it("TTS provider and listening edits survive an in-flight save and dialog reopen", async () => {
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, voice: "nova" } };
+		const first = deferred<Response>();
+		const puts: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [], providers: [] });
+			if (url === "/api/tts/openai") return Response.json({ configured: true, keyPresent: true, custom: true });
+			if (url.includes("custom")) return Response.json({ baseUrl: "http://speech.test/v1", models: [{ id: "kokoro" }] }, { headers: { etag: '"1"' } });
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body));
+				puts.push(body);
+				if (puts.length === 1) return first.promise;
+				record = { ...record, speech: body };
+				return Response.json({ settings: record });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="keys" onClose={() => {}} />);
+		try {
+			const select = q(host, "tts-provider") as HTMLSelectElement;
+			await act(async () => {
+				Object.defineProperty(select, "value", { configurable: true, value: "custom" });
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			await click(q(host, "settings-nav-speech"));
+			await click(q(host, "toggle-read-the-question"));
+			assert.equal(puts.length, 1, "the listening edit waits for the provider save");
+			const mounted = roots.find((entry) => entry.host === host)!;
+			await act(async () => mounted.root.unmount());
+			roots.splice(roots.indexOf(mounted), 1);
+			host.remove();
+			record = { ...record, speech: puts[0] };
+			await act(async () => first.resolve(Response.json({ settings: record })));
+			const reopened = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+			assert.deepEqual(puts, [
+				{ enabled: true, voice: "nova", provider: "custom" },
+				{ enabled: true, voice: "nova", provider: "custom", readQuestion: true },
+			]);
+			assert.equal(q(reopened, "toggle-read-the-question")!.getAttribute("aria-checked"), "true");
+			assert.match(q(reopened, "speech-provider")!.textContent ?? "", /Custom endpoint/);
+		} finally {
+			first.resolve(Response.json({ settings: record }));
+		}
+	});
+
+	it("quick TTS edits on both pages never overwrite each other, through a close and reopen", async () => {
+		let record: Record<string, unknown> = { version: 1, speech: { enabled: true, autoplay: true, readModelAnswers: false } };
+		const first = deferred<void>();
+		const puts: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/keys") return Response.json({ keys: [], providers: [] });
+			if (url === "/api/tts/openai") return Response.json({ configured: true, keyPresent: true, custom: false });
+			if (url.includes("custom")) return Response.json({ baseUrl: "http://speech.test/v1", models: [{ id: "kokoro" }] }, { headers: { etag: '"1"' } });
+			if (init?.method === "PUT") {
+				assert.equal(url, "/api/settings/speech");
+				const body = JSON.parse(String(init.body));
+				puts.push(body);
+				const respond = () => { record = { ...record, speech: body }; return Response.json({ settings: record }); };
+				return puts.length === 1 ? first.promise.then(respond) : respond();
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+		try {
+			await click(q(host, "toggle-read-model-answers"));
+			await click(q(host, "toggle-autoplay-replies"));
+			assert.equal(q(host, "toggle-read-model-answers")!.getAttribute("aria-checked"), "true", "pending edits show at once");
+			assert.equal((q(host, "toggle-read-model-answers") as HTMLButtonElement).disabled, true);
+			await click(q(host, "settings-nav-keys"));
+			const select = q(host, "tts-provider") as HTMLSelectElement;
+			await act(async () => {
+				Object.defineProperty(select, "value", { configurable: true, value: "custom" });
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			assert.equal(puts.length, 1, "later edits wait for the first save");
+			const mounted = roots.find((entry) => entry.host === host)!;
+			await act(async () => mounted.root.unmount());
+			roots.splice(roots.indexOf(mounted), 1);
+			host.remove();
+			await act(async () => first.resolve());
+			const reopened = await mount(<SettingsDialogBody initialSection="speech" onClose={() => {}} />);
+			assert.deepEqual(puts, [
+				{ enabled: true, autoplay: true, readModelAnswers: true },
+				{ enabled: true, autoplay: false, readModelAnswers: true },
+				{ enabled: true, autoplay: false, readModelAnswers: true, provider: "custom" },
+			]);
+			assert.equal(q(reopened, "toggle-autoplay-replies")!.getAttribute("aria-checked"), "false");
+			assert.equal(q(reopened, "toggle-read-model-answers")!.getAttribute("aria-checked"), "true", "kept while greyed out");
+			assert.match(q(reopened, "speech-provider")!.textContent ?? "", /Custom endpoint/);
+		} finally {
+			first.resolve();
+		}
 	});
 
 	it("the shell's navigation request opens General, but opening alone never checks", async () => {

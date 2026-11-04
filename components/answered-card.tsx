@@ -25,7 +25,7 @@ import { LISTEN_YOURS_ATTR } from "@/components/listen/speech-dom";
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const answer = answerForPresentation(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
-	// Compare (listen wave, 2026-10-26): hear your answer, then the committed one.
+	// Compare: hear your answer, then the committed one.
 	const listen = useListen();
 	const yourAnswerRef = useRef<HTMLDivElement>(null);
 	const committedRef = useRef<HTMLDivElement>(null);
@@ -68,6 +68,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 		<div
 			className="group/card rounded-xl border bg-card p-4 text-card-foreground [&>*:last-child]:mb-0"
 			data-testid="answered-card"
+			data-listen-answer-card=""
 			{...{ [LISTEN_YOURS_ATTR]: "" }}
 		>
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -252,7 +253,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			    — one field, reasoning included — shown on submit; no verdict,
 			    the model's next reply IS the grading. */}
 			{isExplain && answer.committed && (
-				<div ref={committedRef} className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground" data-listen-block="The answer">
+				<div ref={committedRef} className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground" data-listen-block="The answer" data-listen-model-answer="">
 					<span className="font-medium text-foreground">The answer: </span>
 					<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.committed}</ToolContentResponse>
 				</div>

@@ -1,5 +1,5 @@
 /**
- * LISTEN BLOCKS (listen wave, 2026-10-26): which pieces of the rendered
+ * Reading blocks: which pieces of the rendered
  * page are listenable, in what order, and what they say.
  *
  * A ROOT (`data-listen-root`) bounds "read from here": the transcript is
@@ -8,14 +8,14 @@
  * Settings → TTS): reading that started in the transcript continues into
  * the dock (adjacentAcross).
  *
- * A BLOCK is the smallest reading unit (owner ruling: paragraph-level):
+ * A BLOCK is the smallest reading unit:
  * - prose: every paragraph, list item, heading, quote, or display equation
  *   rendered from markdown — the LEAF-most one, so a loose list item reads
  *   paragraph by paragraph and a paragraph holding inline math stays whole;
  * - atomic: any element marked `data-listen-block="<label>"` (card sections
  *   — the question, your answer, the correct answer…). Everything inside
  *   an atomic block is that one block; the label names it in the player.
- * - a table ROW (owner ruling: row by row, with headers): the header row
+ * - a table ROW: the header row
  *   reads as-is, every other row pairs each cell with its column header —
  *   "Stage: Validate. What it accomplishes: Compare…".
  * Anything under `data-listen-skip` (reasoning, the plan) is never a block,
@@ -23,8 +23,9 @@
  * research brief) — it isn't on screen; opened, it reads like the rest.
  *
  * What a block SAYS: its text in reading order with math as TeX (KaTeX
- * keeps the source in its MathML annotation; the server speaks it), minus
- * buttons, code blocks, and drawings.
+ * keeps the source in its MathML annotation; the server speaks it), excluding
+ * code blocks, drawings, media, and form inputs. Text-bearing buttons,
+ * such as question options, remain readable.
  */
 
 import type { SpeechPart } from "@/src/core";
@@ -32,15 +33,124 @@ import type { SpeechPart } from "@/src/core";
 export const LISTEN_ROOT_ATTR = "data-listen-root";
 export const LISTEN_BLOCK_ATTR = "data-listen-block";
 export const LISTEN_SKIP_ATTR = "data-listen-skip";
-/** Read only by a read started inside it, even open (the research and
- *  PDF briefs); reads from elsewhere, autoplay included, pass over it. */
+/** Automatic advancement skips research/PDF briefs unless the read started
+ *  inside one. The player's Previous/Next can select their open blocks. */
 export const LISTEN_ASIDE_ATTR = "data-listen-aside";
-/** The learner's own rows (your message, answer card, thinking): never
- *  where an autoplayed reply starts. */
+/** The learner's own rows (your message, answer card, thinking): autoplay
+ * reads on past them, except for an opted-in model answer inside a card. */
 export const LISTEN_YOURS_ATTR = "data-listen-yours";
-/** Fired on the document as reading crosses from the transcript into the
- *  dock: the chat opens a folded dock when no scroll is needed. */
-export const LISTEN_ENTER_DOCK_EVENT = "lh:listen-enter-dock";
+/** Committed answers and practice solutions: optionally included in
+ * autoplay, always available to explicit reading. */
+export const LISTEN_MODEL_ANSWER_ATTR = "data-listen-model-answer";
+/** Answer records contribute only their marked model-answer text to autoplay. */
+export const LISTEN_ANSWER_CARD_ATTR = "data-listen-answer-card";
+/** Omitted from autoplay, but still available to explicit reading. */
+export const LISTEN_AUTOPLAY_SKIP_ATTR = "data-listen-autoplay-skip";
+/** A practice statement's tool call id, on its transcript card and its
+ *  dock copy alike. */
+export const LISTEN_PROBLEM_ATTR = "data-listen-problem";
+/** Who content in a message group belongs to: a text part, a tool call,
+ *  or — once a question call is answered — the learner's answer. Text
+ *  passages also retain their native data-source-message-id. A reply can continue
+ *  an existing group (the answer to a dock question does); autoplay tells
+ *  it from the group's history by these. */
+export const LISTEN_SOURCE_ATTR = "data-listen-source";
+const MESSAGE_SOURCE_ATTR = "data-source-message-id";
+const SOURCE_SELECTOR = `[${LISTEN_SOURCE_ATTR}], [${MESSAGE_SOURCE_ATTR}]`;
+
+export function listenSourceProps(kind: "call" | "answer" | "text", sourceId: string | undefined): Record<string, string> {
+	return sourceId ? { [LISTEN_SOURCE_ATTR]: `${kind}:${sourceId}` } : {};
+}
+
+/** The source `el` was rendered from, or null outside any. */
+export function sourceOf(el: Element): string | null {
+	const owner = sourceElement(el);
+	if (!owner) return null;
+	return owner.getAttribute(LISTEN_SOURCE_ATTR) ?? `message:${owner.getAttribute(MESSAGE_SOURCE_ATTR)}`;
+}
+
+export function sourceElement(el: Element): Element | null {
+	return el.closest(SOURCE_SELECTOR);
+}
+
+export function findSource(root: Element, source: string): Element | null {
+	const matches = Array.from(root.querySelectorAll(SOURCE_SELECTOR)).filter((el) => sourceOf(el) === source);
+	// Older/unmarked text passages can share a message id. Ambiguity must
+	// fall back to the validated structural position, never the first match.
+	return matches.length === 1 ? matches[0]! : null;
+}
+
+/** Every source rendered inside `root`. */
+export function sourcesIn(root: Element): Set<string> {
+	const out = new Set<string>();
+	for (const el of root.querySelectorAll(SOURCE_SELECTOR)) {
+		const source = sourceOf(el);
+		if (source) out.add(source);
+	}
+	return out;
+}
+
+/** A readable block's identity, shared by playback, waiting and keyboard
+ * selection. Element paths do not shift when earlier details are opened. */
+export interface ListenAnchor {
+	block: Element;
+	root: Element;
+	owner: Element;
+	source: string | null;
+	ownerPath: number[];
+	blockPath: number[];
+	text: string;
+}
+
+const anchorText = (block: Element) => (block.textContent ?? "").replace(/\s+/g, " ").trim();
+
+export function anchorFor(block: Element | null): ListenAnchor | null {
+	const root = block && rootOf(block);
+	if (!root || !block) return null;
+	const source = sourceElement(block);
+	const owner = source && root.contains(source) ? source : root;
+	const ownerPath = elementPath(root, owner);
+	const blockPath = elementPath(owner, block);
+	return ownerPath && blockPath ? { block, root, owner, source: owner === root ? null : sourceOf(owner), ownerPath, blockPath, text: anchorText(block) } : null;
+}
+
+function elementPath(root: Element, element: Element): number[] | null {
+	const path: number[] = [];
+	for (let at = element; at !== root;) {
+		const parent = at.parentElement;
+		if (!parent) return null;
+		path.unshift(Array.from(parent.children).indexOf(at));
+		at = parent;
+	}
+	return path;
+}
+
+function elementAtPath(root: Element, path: readonly number[]): Element | null {
+	let at: Element | undefined = root;
+	for (const index of path) at = at?.children[index];
+	return at ?? null;
+}
+
+export function connectedRoot(root: Element | null): Element | null {
+	if (!root || root.isConnected) return root;
+	const name = root.getAttribute(LISTEN_ROOT_ATTR);
+	return Array.from(document.querySelectorAll(`[${LISTEN_ROOT_ATTR}]`)).find((el) => el.getAttribute(LISTEN_ROOT_ATTR) === name) ?? null;
+}
+
+/** Resolve the same source and position, never identical historical text.
+ * An unfinished block may change its text before it is ready to read. */
+export function resolveAnchor(anchor: ListenAnchor | null, unfinished = false): Element | null {
+	const root = connectedRoot(anchor?.root ?? null);
+	if (!anchor || !root) return null;
+	const blocks = blocksIn(root);
+	if (anchor.block.isConnected) return blocks.includes(anchor.block) ? anchor.block : null;
+	const owner = root.contains(anchor.owner)
+		? anchor.owner
+		: (anchor.source && findSource(root, anchor.source)) || elementAtPath(root, anchor.ownerPath);
+	if (!owner || (anchor.source && sourceElement(owner) !== owner)) return null;
+	const at = elementAtPath(owner, anchor.blockPath);
+	return at && blocks.includes(at) && (unfinished || (anchor.text && anchorText(at).startsWith(anchor.text))) ? at : null;
+}
 
 const PROSE = "p, li, h1, h2, h3, h4, h5, h6, blockquote, .katex-display";
 /** Prose that makes its container a non-leaf (display math does not: a
@@ -118,6 +228,17 @@ export function adjacentAcross(block: Element, start: Element, dir: 1 | -1): Ele
 	}
 	if (dir === -1 && root !== start && start.isConnected) return blocksIn(start).at(-1) ?? null;
 	return null;
+}
+
+/** Is `block` the transcript card of the problem the dock holds? Matched
+ * by tool call, so an older problem with the same text is not. Autoplay
+ * with Read the question on reads only the dock copy; a read the learner
+ * starts reads both. */
+export function isDockedProblem(block: Element): boolean {
+	const id = block.getAttribute(LISTEN_PROBLEM_ATTR);
+	if (!id || rootOf(block)?.getAttribute(LISTEN_ROOT_ATTR) !== "transcript") return false;
+	const dock = dockRoot(block.ownerDocument);
+	return dock !== null && blocksIn(dock).some((b) => b.getAttribute(LISTEN_PROBLEM_ATTR) === id);
 }
 
 export function dockRoot(doc: Document): Element | null {

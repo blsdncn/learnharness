@@ -884,7 +884,7 @@ describe("automatic continuation after recovery failure", () => {
 describe("answer submission recovery", () => {
 	const question = {
 		...assistantMsg("question", "Q?"),
-		content: [{ type: "toolCall", id: "q1", name: "quiz", arguments: { question: "Q?" } }],
+		content: [{ type: "toolCall", id: "q1", name: "quiz", arguments: { question: "Q?", options: [{ label: "A" }, { label: "B" }], correctAnswer: "A", explanation: "A is correct." } }],
 	} as LhMessage;
 	const answer = buildAnswer({ id: "q1", kind: "quiz", question: "Q?", mode: "single-select", options: [], createdAt: "fixture" }, { dontKnow: true, thinking: "keep my reasoning" });
 
@@ -907,6 +907,20 @@ describe("answer submission recovery", () => {
 		await m.submitAnswer("quiz", "q1", answer);
 		assert.equal(posts, 2, "error must not permanently close the send gate");
 		assert.deepEqual(calls.slice(0, 3), ["/api/chat", "/api/chats/chat_x", "/api/chat"]);
+	});
+
+	it("resolves whether the answer was accepted, as send() does", async () => {
+		const accepting = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") return Response.json({ ok: true });
+			if (String(url).endsWith("/stream")) return sseResponse("[DONE]");
+			return Response.json({ messages: [question, newAnswerResult("q1", "quiz", answer)], turnInFlight: false });
+		} });
+		assert.equal(await accepting.submitAnswer("quiz", "q1", answer), true);
+		const refusing = model({ initialMessages: [question], fetch: async () => new Response("request refused", { status: 500 }) });
+		assert.equal(await refusing.submitAnswer("quiz", "q1", answer), false);
+		assert.equal(refusing.status, "error");
+		const stale = model({ initialMessages: [question], fetch: async () => { throw new Error("must not post"); } });
+		assert.equal(await stale.submitAnswer("quiz", "q1", answer, "another-occurrence"), false, "a render-scoped key that no longer owns the dock");
 	});
 
 	it("retains all submitted draft channels until the canonical answer resolves the call", async () => {

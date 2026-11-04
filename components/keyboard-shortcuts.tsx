@@ -130,9 +130,10 @@ export function KeyboardShortcuts() {
 				case "cheat-sheet":
 					handlersRef.current.setCheatOpen(true);
 					break;
+				case "focus-listening":
 				case "find":
 					// The mounted surface owns Find (session text / graph nodes).
-					// Claim Mod+F so Chromium's whole-window finder cannot open too.
+					// Surface shortcuts own their browser default too.
 					e.preventDefault();
 					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 					break;

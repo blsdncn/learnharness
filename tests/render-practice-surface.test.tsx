@@ -121,6 +121,8 @@ describe("the practice transcript cards", () => {
 		assert.match(html, /Concluded/); // the plain eyebrow (owner round 3)
 		assert.match(html, /Solved/); // the outcome rides the quiz chip
 		assert.match(html, /Model solution/); // the labeled hero after the divider
+		assert.match(html, /data-listen-block="Model solution" data-listen-model-answer=""/);
+		assert.doesNotMatch(html, /data-listen-block="Verdict" data-listen-model-answer/);
 		assert.ok(html.indexOf("Solved") < html.indexOf("Model solution"), "chip at the top");
 		assert.match(html, /The pairing came after R2\./);
 		// VERDICT FIRST (owner round 3): verdict under the heading row, then

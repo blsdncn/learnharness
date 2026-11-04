@@ -31,6 +31,7 @@ import {
 	CUSTOM_PROVIDER,
 	CUSTOM_STT_KEY_ID,
 	CUSTOM_TTS_KEY_ID,
+	isCustomKeyName,
 	normalizeBaseUrl,
 	OPENAI_AUDIO_KEY_ID,
 	STT_PATH,
@@ -104,9 +105,6 @@ async function readCustomStatus(inspectKey = false, route = CHAT_ENDPOINT_UI.rou
  *  these ids are the contract). Derived from the catalog (search wave,
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
-/** The TTS / dictation custom endpoints' keys live in their own editors,
- *  never listed as rows (like the chat endpoint's key below). */
-const INLINE_KEY_IDS: readonly string[] = [CUSTOM_TTS_KEY_ID, CUSTOM_STT_KEY_ID];
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
 
 /** The tool keys' groups, in display order: dictation owns Deepgram;
@@ -154,11 +152,8 @@ export function classifyKeys(
 	const providerRows: AuthKeyStatus[] = [];
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
-		if (isTool(s.id) || INLINE_KEY_IDS.includes(s.id)) continue;
-		// The custom endpoint's key has its OWN home (the Custom endpoint
-		// section), so it never shows here — not as a provider row, not as an
-		// "other stored variable".
-		if (s.id === CUSTOM_PROVIDER.envVar) continue;
+		// Custom keys belong to their endpoint editors, never these rows.
+		if (isTool(s.id) || isCustomKeyName(s.id)) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -436,9 +431,9 @@ export function KeysSection({
 		if (openRow === null && adding === null && !addingCustom) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
-			// A language dropdown above this editor in the dismissal stack owns
+			// A language or TTS model menu above this editor owns
 			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
+			if (document.querySelector('[data-testid="dictation-language-menu"], [data-testid="tts-custom-model-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -766,6 +761,7 @@ function AudioProviders<P extends string>({
 		if (!editing) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
+			if (document.querySelector('[data-testid="tts-custom-model-menu"], [data-testid="dictation-custom-model-menu"], [data-testid="dictation-language-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setEditing(false);

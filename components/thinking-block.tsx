@@ -85,7 +85,7 @@ export function ThinkingBlock({
 	defaultOpen?: boolean;
 	/** On the card's own background: no band (the accent read too light). */
 	inCard?: boolean;
-	/** Listenable as one block under this name (listen wave) — the
+	/** Listenable as one block under this name — the
 	 *  learner's own thinking; omitted, the row is not listenable. */
 	listenLabel?: string;
 }) {
