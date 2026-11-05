@@ -55,6 +55,12 @@ export const LISTEN_PROBLEM_ATTR = "data-listen-problem";
  *  an existing group (the answer to a dock question does); autoplay tells
  *  it from the group's history by these. */
 export const LISTEN_SOURCE_ATTR = "data-listen-source";
+/** On the dock root while a question or practice problem is folded into
+ *  its bar (scrolled up, or a teach check behind its reveal). */
+export const LISTEN_DOCK_CLOSED_ATTR = "data-listen-dock-closed";
+/** The player's request to open a folded dock, handled exactly as a click
+ *  on its bar. */
+export const LISTEN_OPEN_DOCK_EVENT = "lh:listen-open-dock";
 const MESSAGE_SOURCE_ATTR = "data-source-message-id";
 const SOURCE_SELECTOR = `[${LISTEN_SOURCE_ATTR}], [${MESSAGE_SOURCE_ATTR}]`;
 
