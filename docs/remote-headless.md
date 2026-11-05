@@ -49,6 +49,12 @@ pairing URL, valid for five minutes; open it privately on the device being
 paired. Mint a fresh URL if it expires. Do not put pairing output in
 shared logs. Remote browsers cannot mint links or administer devices.
 
+A Home Screen web app (for example on iPhone, from Safari or Chrome) keeps
+its own storage, separate from the browser, so pairing a browser tab does
+not pair the saved app, and the saved app's URL cannot be edited. Open the
+app instead, copy a fresh pairing link, and use the pairing page's
+**Paste** button or text box; it accepts the whole link or its bare grant.
+
 Administration uses an HTTP protocol over a mode-0600 Unix socket inside
 a mode-0700 directory, with no TCP management listener. Existing control
 sockets are never overwritten. Under systemd, `RuntimeDirectory` removes

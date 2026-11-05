@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 const require = createRequire(import.meta.url);
 const { createRemoteAccess } = require("../electron/remote-access.cjs");
 const { createTailscaleServe } = require("../electron/tailscale-serve.cjs");
+const { pairingPage, parsePairingInput } = require("../electron/remote-pairing.cjs");
 const origin = "https://learn.test.ts.net:8443";
 const capability = "a".repeat(64);
 
@@ -76,6 +77,27 @@ test("remote ingress is opt-in, protects pages and APIs, and rejects untrusted o
 	assert.equal((await f.request("/", { headers: { "x-forwarded-proto": "http" } })).status, 403);
 	assert.equal((await f.request("/_lh/remote/pair", { method: "POST", headers: { origin: "https://evil.invalid" } })).status, 403);
 	assert.equal(f.received.length, 0);
+});
+
+test("Home Screen web apps can pair by pasting a link or bare grant", async (t) => {
+	const grant = "Ab3_-".repeat(8) + "xyz";
+	assert.equal(grant.length, 43);
+	assert.equal(parsePairingInput(`  https://learn.test.ts.net:8443/_lh/remote/pair#grant=${grant}\n`), grant);
+	assert.equal(parsePairingInput(grant), grant);
+	for (const bad of ["", "hello", grant.slice(1), grant + "a", `${grant.slice(0, 42)}!`, "https://learn.test.ts.net:8443/_lh/remote/pair", `https://x.invalid/?grant=${grant}`]) assert.equal(parsePairingInput(bad), null, bad);
+
+	const page = pairingPage("n0nce");
+	assert.match(page, /<label for="link">Paste pairing link or code<\/label><input id="link"[^>]*autocapitalize="off"[^>]*autocorrect="off"[^>]*spellcheck="false"/);
+	assert.match(page, /<button id="paste" type="button">Paste<\/button>/);
+	assert.match(page, /Paste a fresh pairing link to continue\./);
+	assert.match(page, /That isn't a pairing link\. Copy the whole link and try again\./);
+	assert.match(page, /Tap the box and paste instead\./);
+	const script = page.match(/<script nonce="n0nce">([\s\S]*)<\/script>/)![1]!;
+	assert.doesNotThrow(() => new Function(script), "the embedded page script parses");
+
+	const f = await fixture(t);
+	await f.remote.control({ op: "enable" });
+	assert.match((await f.request("/")).body, /id="link"/);
 });
 
 test("pairing is single-use, credentials are origin-bound, and proxy forwards to the same backend with server-only capability", async (t) => {
