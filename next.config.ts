@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 import { MAX_DICTATION_WAV_BYTES } from "./src/core/dictation.ts";
 import { MAX_IMPORT_BODY_BYTES } from "./lib/notes-import-limits.ts";
+import { MAX_ATTACHMENT_BODY_BYTES } from "./src/core/attachment-upload.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
@@ -11,7 +12,7 @@ const nextConfig: NextConfig = {
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.
-	experimental: { proxyClientMaxBodySize: Math.max(MAX_IMPORT_BODY_BYTES, MAX_DICTATION_WAV_BYTES) },
+	experimental: { proxyClientMaxBodySize: Math.max(MAX_IMPORT_BODY_BYTES, MAX_DICTATION_WAV_BYTES, MAX_ATTACHMENT_BODY_BYTES) },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).

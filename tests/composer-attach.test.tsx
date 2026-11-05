@@ -1,7 +1,7 @@
 /**
  * The composer's attach button (issue #285): the picker's twin of a file
  * drop. Picked files become quoted path chips at the caret through the
- * desktop bridge; the browser build explains instead. Same linkedom
+ * desktop bridge or browser upload. Same linkedom
  * shims as file-path-drop-zone.test.tsx (no native Selection there).
  */
 import React, { act } from "react";
@@ -19,7 +19,7 @@ import { quoteFilePath } from "../src/core/file-paths.ts";
 let cleanup: (() => Promise<void>) | undefined;
 afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
-async function fixture({ desktop = true } = {}) {
+async function fixture({ desktop = true, respond }: { desktop?: boolean; respond?: (body: FormData, signal?: AbortSignal | null) => Promise<Response> } = {}) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -38,11 +38,18 @@ async function fixture({ desktop = true } = {}) {
 	let folderResult: string | null | Error = null;
 	let byteReads = 0;
 	let sends = 0;
+	const uploads: FormData[] = [];
 	let value = "readthis";
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [name, next] of Object.entries({
 		React, window: win, document: doc, Node: win.Node, HTMLElement: win.HTMLElement, Element: win.Element,
 		Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, innerWidth: 1000, innerHeight: 800,
+		fetch: async (url: string, init: RequestInit) => {
+			assert.equal(url, "/api/attachments");
+			assert.equal(init.method, "POST");
+			const body = init.body as FormData; uploads.push(body);
+			return respond ? respond(body, init.signal) : Response.json({ paths: body.getAll("files").map((file, i) => `/private/uploads/batch/${i}/${(file as File).name}`) });
+		},
 	})) {
 		previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 		Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: next });
@@ -77,6 +84,9 @@ async function fixture({ desktop = true } = {}) {
 		get pickerClicks() { return pickerClicks; },
 		get folderCalls() { return folderCalls; },
 		get sends() { return sends; },
+		uploads,
+		async setDraft(next: string) { await act(async () => { value = next; draw(); }); },
+		async unmount() { await cleanup?.(); cleanup = undefined; },
 		setFolderResult(result: typeof folderResult) { folderResult = result; },
 		async choice(label: string) {
 			await act(async () => { Array.from(doc.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) => button.textContent === label)!.click(); });
@@ -146,9 +156,9 @@ describe("composer attach button", () => {
 		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2 });
 	});
 
-	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
+	it("server render enables browser uploads with the paperclip between the input and Send", () => {
 		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
-		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Attach files"/);
+		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="false"|aria-disabled="false"[^>]*aria-label="Attach files"/);
 		const editor = html.indexOf("data-file-path-input");
 		const attach = html.indexOf('data-testid="attach-files"');
 		const send = html.indexOf('aria-label="Send"');
@@ -259,12 +269,75 @@ describe("composer attach button", () => {
 		assert.equal(f.sends, 0);
 	});
 
-	it("browser: the button stays inert and the picker never opens", async () => {
+	it("browser: picker uploads multiple files and inserts server paths at the caret without submitting", async () => {
 		const f = await fixture({ desktop: false });
-		assert.equal(f.button.getAttribute("aria-disabled"), "true");
+		assert.equal(f.button.getAttribute("aria-disabled"), "false");
+		f.caret(4);
+		await act(async () => { f.button.click(); });
+		assert.equal(f.pickerClicks, 1);
+		assert.equal(f.doc.querySelector('[role="menu"]'), null);
+		await f.pick([f.file("a.pdf"), f.file("my notes.md")]);
+		assert.equal(f.value, "read `/private/uploads/batch/0/a.pdf` `/private/uploads/batch/1/my notes.md` this");
+		assert.equal(f.uploads.length, 1);
+		assert.equal(f.sends, 0);
+		assert.equal(f.doc.querySelector('[role="status"]'), null);
+	});
+
+	it("browser upload reports pending state, ignores repeat clicks and retains edits made while waiting", async () => {
+		let finish!: (response: Response) => void;
+		const f = await fixture({ desktop: false, respond: () => new Promise((resolve) => { finish = resolve; }) });
+		await f.pick([f.file("a.pdf")]);
+		assert.match(f.doc.querySelector('[role="status"]')!.textContent!, /Uploading files/);
+		assert.equal(f.button.getAttribute("aria-busy"), "true");
 		await act(async () => { f.button.click(); });
 		assert.equal(f.pickerClicks, 0);
-		await f.pick([f.file("a.pdf", "/a.pdf")]);
+		await f.setDraft("edited draft");
+		f.caret("edited draft".length);
+		await act(async () => { finish(Response.json({ paths: ["/private/uploads/a.pdf"] })); });
+		assert.equal(f.value, "edited draft `/private/uploads/a.pdf`");
+		assert.equal(f.sends, 0);
+		assert.equal(f.button.getAttribute("aria-busy"), "false");
+	});
+
+	it("browser failures keep draft intact, show the error and allow selecting the same file again", async () => {
+		let attempt = 0;
+		const f = await fixture({ desktop: false, respond: async () => ++attempt === 1
+			? Response.json({ error: "Upload refused by file-access settings." }, { status: 403 })
+			: Response.json({ paths: ["/private/uploads/a.pdf"] }) });
+		const file = f.file("a.pdf");
+		await f.pick([file]);
 		assert.equal(f.value, "readthis");
+		assert.match(f.doc.querySelector('[role="status"]')!.textContent!, /file-access settings/);
+		assert.equal(f.doc.querySelector<HTMLInputElement>('[data-testid="attach-files-input"]')!.value, "");
+		await f.pick([file]);
+		assert.match(f.value, /private\/uploads\/a.pdf/);
+		assert.equal(f.uploads.length, 2);
+		assert.equal(f.sends, 0);
+	});
+
+	it("oversized browser selections are refused before a request, and cancellation leaves the draft alone", async () => {
+		const f = await fixture({ desktop: false });
+		await f.pick([]);
+		assert.equal(f.uploads.length, 0);
+		await f.pick([new File([new Uint8Array(25 * 1024 * 1024 + 1)], "large.pdf")]);
+		assert.equal(f.uploads.length, 0);
+		assert.equal(f.value, "readthis");
+		assert.match(f.doc.querySelector('[role="status"]')!.textContent!, /Max 25 MB/);
+	});
+
+	it("leaving the composer aborts an upload and ignores a late response", async () => {
+		let finish!: (response: Response) => void;
+		let signal: AbortSignal | null | undefined;
+		const f = await fixture({ desktop: false, respond: (_body, requestSignal) => {
+			signal = requestSignal;
+			return new Promise((resolve) => { finish = resolve; });
+		} });
+		await f.pick([f.file("a.pdf")]);
+		await f.unmount();
+		assert.equal(signal?.aborted, true);
+		finish(Response.json({ paths: ["/private/uploads/a.pdf"] }));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.equal(f.value, "readthis");
+		assert.equal(f.sends, 0);
 	});
 });

@@ -2,11 +2,11 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { PaperclipIcon } from "lucide-react";
+import { Loader2Icon, PaperclipIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
-import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
+import { useAttachmentUpload } from "@/components/attachment-upload";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -48,12 +48,9 @@ function useDesktopPaths(): boolean {
 
 /**
  * The attach button (issue #285): the picker's twin of a file drop — files
- * stay where they are and only their quoted paths enter the draft, at the
- * caret of `editorRef` (a PathInput root). Any file type; the agent reads
- * what it can. Desktop only: a browser File has no local path, so there the
- * button explains instead (the drop zone's notice). The separate native
- * folder choice returns the directory itself, including an empty directory.
- * aria-disabled, not disabled, so the tooltip still shows.
+ * stay where they are on desktop. Browser files are uploaded first, then
+ * their server paths enter the same draft as ordinary path chips. Neither
+ * selection sends the message. Native folder selection stays desktop-only.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
 	const pickerRef = useRef<HTMLInputElement>(null);
@@ -63,13 +60,15 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	const choosingFolder = useRef(false);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
+	const { upload, uploading, error, clearError } = useAttachmentUpload();
+	const status = notice || error || (uploading ? "Uploading files…" : "");
 	const [placement, setPlacement] = useState<ReturnType<typeof attachmentPopupPlacement> | null>(null);
 	const positioned = placement !== null;
 	// Like MenuShell, portal to body with viewport-capped, reanchored placement.
 	// The production chat/new-session docks deliberately clip their children.
 	// Keep notice focus passive; only the choice menu takes keyboard focus.
 	useLayoutEffect(() => {
-		if (!open && !notice) { setPlacement(null); return; }
+		if (!open && !status) { setPlacement(null); return; }
 		const button = buttonRef.current;
 		const popup = popupRef.current;
 		if (!button || !popup) return;
@@ -85,25 +84,25 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 		window.addEventListener("scroll", place, true);
 		window.addEventListener("resize", place);
 		return () => { observer?.disconnect(); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
-	}, [open, notice]);
+	}, [open, status]);
 	useEffect(() => { if (open && positioned) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned]);
 	useEffect(() => {
-		if (!open && !notice) return;
+		if (!open && !status) return;
 		const dismissOutside = (event: PointerEvent) => {
 			if (event.target instanceof Node && !popupRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
-				setOpen(false); setNotice("");
+				setOpen(false); setNotice(""); clearError();
 			}
 		};
 		document.addEventListener("pointerdown", dismissOutside);
 		return () => document.removeEventListener("pointerdown", dismissOutside);
-	}, [open, notice]);
+	}, [open, status]);
 	const chooseFolder = async () => {
 		if (choosingFolder.current) return;
 		const editor = editorRef.current;
 		const choose = window.lh?.chooseAttachmentFolder;
 		setOpen(false);
 		setNotice("");
-		if (!choose) { setNotice(BROWSER_NOTICE); return; }
+		if (!choose) { setNotice("Folder selection is available in the desktop app. Select files to upload instead."); return; }
 		choosingFolder.current = true;
 		try {
 			const chosen = await choose();
@@ -125,29 +124,39 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				multiple
 				hidden
 				data-testid="attach-files-input"
-				onChange={(e) => {
+				onChange={async (e) => {
+					const files = Array.from(e.currentTarget.files ?? []);
+					e.currentTarget.value = ""; // allow re-picking the same file, including after errors
+					if (!files.length) return;
+					setNotice(""); clearError();
 					const resolve = window.lh?.getPathForFile;
-					const { paths } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [] };
-					if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
-					e.currentTarget.value = ""; // allow re-picking the same file
+					const editor = editorRef.current;
+					const paths = resolve ? pathsForFiles(files, resolve).paths : await upload(files);
+					if (paths?.length && editor?.isConnected && editor === editorRef.current) editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
 				}}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			<Hint label={desktop ? "Attach files or a folder" : "Upload files (up to 25 MB)"}>
 				<button
 					ref={buttonRef}
 					type="button"
 					aria-label="Attach files"
-					aria-disabled={!desktop}
-					aria-haspopup="menu"
+					aria-disabled={uploading}
+					aria-busy={uploading}
+					aria-haspopup={desktop ? "menu" : undefined}
 					aria-expanded={open}
 					data-testid="attach-files"
-					onClick={() => { if (desktop) { setNotice(""); setOpen(!open); } }}
+					onClick={() => {
+						if (uploading) return;
+						setNotice(""); clearError();
+						if (desktop) setOpen(!open);
+						else pickerRef.current?.click();
+					}}
 					className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
 				>
-					<PaperclipIcon className="size-4" />
+					{uploading ? <Loader2Icon className="size-4 animate-spin" /> : <PaperclipIcon className="size-4" />}
 				</button>
 			</Hint>
-			{(open || notice) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
+			{(open || status) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
 				aria-label={open ? "Attach files or a folder" : undefined}
 				data-testid="attachment-popup"
 				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
@@ -163,7 +172,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
-				</> : notice}
+				</> : status}
 			</div>, document.body)}
 		</div>
 	);

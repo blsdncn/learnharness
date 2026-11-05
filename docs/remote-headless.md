@@ -1,5 +1,19 @@
 # Private remote access on a headless Linux host
 
+Paired phone and laptop browsers can attach files to a chat using its paperclip
+or drag-and-drop. Select multiple files up to 25 MiB total per upload. The app
+shows upload status/errors and inserts references into the draft; send the message
+when ready. Browser folder uploads are not supported. Desktop file/folder picking
+continues to reference existing local paths.
+
+Uploaded files persist privately under `LH_DATA_DIR/uploads/`, so include that
+directory when backing up the profile. Names are preserved inside unique upload
+directories; repeated filenames cannot overwrite earlier attachments. Existing
+File access settings still apply. If restrictions block the upload location,
+adjust the allowed folders explicitly rather than changing other preferences.
+Uploads are retained across restarts and session deletion, including abandoned
+draft attachments. Uploading does not run extraction or infer a model response.
+
 `scripts/remote-headless.cjs` starts the production standalone server and
 the existing authenticated Tailscale gateway without Electron. It supports
 API-key providers, TTS, dictation, learning sessions and the graph. ChatGPT

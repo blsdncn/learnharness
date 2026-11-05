@@ -68,6 +68,7 @@ export * from "./fuzzy.ts";
 // view. Browser-safe — the Wave-4 panel imports these directly.
 export * from "./settings.ts";
 export * from "./file-access.ts";
+export * from "./attachment-upload.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one

@@ -14,7 +14,7 @@ afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
 /** No native DataTransfer/Selection in linkedom. These shims exercise React's
  * real bubbling handlers and the editor's logical caret contract, not OS drag. */
-async function fixture({ desktop = true, claimed = true } = {}) {
+async function fixture({ desktop = true, claimed = true, respond }: { desktop?: boolean; claimed?: boolean; respond?: () => Promise<Response> } = {}) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -44,7 +44,10 @@ async function fixture({ desktop = true, claimed = true } = {}) {
 	for (const [name, next] of Object.entries({
 		React, window: win, document: doc, Node: win.Node, HTMLElement: win.HTMLElement, Element: win.Element,
 		Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
-		fetch: () => { uploads++; throw new Error("No network expected for file drops"); },
+		fetch: async (url: string, init: RequestInit) => {
+			uploads++; assert.equal(url, "/api/attachments");
+			return respond ? respond() : Response.json({ paths: (init.body as FormData).getAll("files").map((f, i) => `/private/uploads/batch/${i}/${(f as File).name}`) });
+		},
 	})) {
 		previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 		Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: next });
@@ -59,7 +62,7 @@ async function fixture({ desktop = true, claimed = true } = {}) {
 			<aside data-testid="sidebar">Sidebar</aside>
 			<FilePathDropZone>
 				<form onSubmit={(event) => { event.preventDefault(); submits++; }}>
-					<PathInput data-testid="editor" value={value} onValueChange={(next) => { value = next; draw(); }} onKeyDown={() => { keys++; }} />
+					<PathInput data-testid="editor" defaultDropTarget={claimed} value={value} onValueChange={(next) => { value = next; draw(); }} onKeyDown={() => { keys++; }} />
 					<button type="button" data-testid="elsewhere">Elsewhere</button>
 					<div data-testid="content">Content away from the input</div>
 				</form>
@@ -103,6 +106,8 @@ async function fixture({ desktop = true, claimed = true } = {}) {
 		doc, editor, appends, resolved, file, transfer, event,
 		get value() { return value; },
 		get status() { return doc.querySelector('[role="status"]')?.textContent ?? ""; },
+		get uploads() { return uploads; },
+		get submits() { return submits; },
 		focusEditor(offset: number) {
 			editor.focus();
 			restorePathSelection(editor, { anchor: offset, focus: offset });
@@ -149,24 +154,52 @@ test("unfocused drop uses the dictation target registry, not the last focused ed
 	f.assertPathOnly();
 });
 
-test("browser drop prevents navigation, explains desktop-only local paths and never infers File.name", async () => {
+test("browser drop prevents navigation, uploads and inserts returned server paths without sending", async () => {
 	const f = await fixture({ desktop: false });
-	const transfer = f.transfer([f.file("/not/a/backing/path.pdf")]);
+	f.focusEditor(4);
+	const transfer = f.transfer([f.file("paper.pdf")]);
 	const enter = await f.event("dragenter", transfer);
 	assert.equal(enter.defaultPrevented, true);
-	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /desktop app/);
+	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /Drop to upload files/);
 	const over = await f.event("dragover", transfer);
 	assert.equal(over.defaultPrevented, true);
 	assert.equal(transfer.dropEffect, "copy");
 	const drop = await f.event("drop", transfer);
 	assert.equal(drop.defaultPrevented, true);
-	assert.match(f.status, /Local file paths can only be attached in the desktop app/);
-	assert.match(f.status, /paste a full path instead/);
+	assert.equal(f.status, "");
 	assert.equal(f.doc.querySelector('[data-testid="file-path-drop-indicator"]'), null);
-	assert.equal(f.value, "readthis");
+	assert.equal(f.value, "read `/private/uploads/batch/0/paper.pdf` this");
 	assert.deepEqual(f.appends, []);
 	assert.deepEqual(f.resolved, []);
-	f.assertPathOnly();
+	assert.equal(f.uploads, 1);
+	assert.equal(f.submits, 0);
+});
+
+test("unfocused browser drop uses the chat draft, and folder drops are refused without uploading", async () => {
+	const f = await fixture({ desktop: false });
+	await f.event("drop", f.transfer([f.file("folder")], [0]));
+	assert.match(f.status, /Folder uploads are not supported/);
+	assert.equal(f.uploads, 0);
+	await f.event("drop", f.transfer([f.file("notes.md")]));
+	assert.equal(f.value, "readthis `/private/uploads/batch/0/notes.md`");
+	assert.equal(f.uploads, 1);
+	assert.deepEqual(f.appends, [], "remote uploads stay attached to the captured chat input");
+	assert.equal(f.submits, 0);
+});
+
+test("browser drop errors preserve the draft, and a later successful drop clears the error", async () => {
+	let attempts = 0;
+	const f = await fixture({ desktop: false, respond: async () => ++attempts === 1
+		? Response.json({ error: "Could not save the files." }, { status: 500 })
+		: Response.json({ paths: ["/private/uploads/notes.md"] }) });
+	const files = f.transfer([f.file("notes.md")]);
+	await f.event("drop", files);
+	assert.match(f.status, /Could not save/);
+	assert.equal(f.value, "readthis");
+	await f.event("drop", files);
+	assert.equal(f.status, "");
+	assert.match(f.value, /private\/uploads\/notes.md/);
+	assert.equal(f.submits, 0);
 });
 
 test("mixed files and directories retain one original path each in drop order; invalid paths are skipped", async () => {
@@ -233,7 +266,7 @@ test("non-file drags stay native; sidebar file drops prevent navigation without 
 });
 
 test("nested enter/leave depth keeps the drop overlay until the zone is left; notice is dismissible", async () => {
-	const f = await fixture({ desktop: false });
+	const f = await fixture({ desktop: false, claimed: false });
 	const transfer = f.transfer([f.file("notes.pdf")]);
 	await f.event("dragenter", transfer);
 	await f.event("dragenter", transfer);

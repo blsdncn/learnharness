@@ -105,6 +105,26 @@ test("pairing is single-use, credentials are origin-bound, and proxy forwards to
 	assert.equal((await f.request("/_lh/remote/enable", { method: "POST", headers: { origin, "x-learnharness-remote": paired.token } })).status, 404);
 });
 
+test("authenticated remote multipart uploads preserve their body and boundary, while unpaired and cross-origin uploads never reach the backend", async (t) => {
+	const f = await fixture(t);
+	await f.remote.control({ op: "enable" });
+	const paired = await f.pair();
+	const form = new FormData();
+	form.append("files", new File(["%PDF-1.4\nprivate lesson bytes\u0000"], "lecture.pdf", { type: "application/pdf" }));
+	form.append("files", new File(["notes with Unicode: 図"], "notes.md"));
+	const encoded = new Response(form);
+	const body = await encoded.text();
+	const headers = { origin, "x-learnharness-remote": paired.token, "content-type": encoded.headers.get("content-type")!, "content-length": String(Buffer.byteLength(body)) };
+	assert.equal((await f.request("/api/attachments", { method: "POST", headers: { origin, "content-type": headers["content-type"] }, body })).status, 401);
+	assert.equal((await f.request("/api/attachments", { method: "POST", headers: { ...headers, origin: "https://evil.invalid" }, body })).status, 403);
+	assert.equal(f.received.length, 0);
+	assert.equal((await f.request("/api/attachments", { method: "POST", headers, body })).status, 200);
+	assert.equal(f.received[0]!.body, body);
+	assert.equal(f.received[0]!.headers["content-type"], headers["content-type"]);
+	assert.equal(f.received[0]!.headers["x-learnharness-desktop"], capability);
+	assert.equal(f.received[0]!.headers["x-learnharness-remote"], undefined);
+});
+
 test("revocation survives failed configuration writes and restart; cleanup still runs when disable cannot save", async (t) => {
 	let failing = false;
 	const f = await fixture(t, { ...fs, renameSync: (...args: Parameters<typeof fs.renameSync>) => {

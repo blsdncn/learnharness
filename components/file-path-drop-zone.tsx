@@ -5,18 +5,24 @@ import { FileSymlinkIcon, XIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
-
-export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
+import { useAttachmentUpload } from "@/components/attachment-upload";
 
 /** The content area only: the sidebar is deliberately outside this zone.
- * Existing files stay where they are; only quoted path strings enter drafts. */
+ * Desktop files stay in place; browser files become persistent private uploads. */
 export function FilePathDropZone({ children, className, inert }: { children: React.ReactNode; className?: string; inert?: boolean }) {
 	const root = useRef<HTMLElement>(null);
 	const depth = useRef(0);
 	const [dragging, setDragging] = useState(false);
 	const [notice, setNotice] = useState("");
+	const { upload, uploading, error, clearError } = useAttachmentUpload();
+	const status = notice || error || (uploading ? "Uploading files…" : "");
 	const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
 	const clearDrag = () => { depth.current = 0; setDragging(false); };
+	const uploadDrop = async (files: File[], editor: HTMLElement) => {
+		const paths = await upload(files);
+		if (!paths?.length) return;
+		if (editor.isConnected && root.current?.contains(editor)) editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+	};
 	useEffect(() => {
 		// The sidebar remains a non-target, but dropping a file there must not
 		// navigate the app away. No indicator or attachment is produced there.
@@ -38,11 +44,12 @@ export function FilePathDropZone({ children, className, inert }: { children: Rea
 			inert={inert}
 			data-testid="file-path-drop-zone"
 			onDragEnter={(event) => {
-				if (!hasFiles(event)) return;
+				if (!hasFiles(event) || uploading) return;
 				event.preventDefault();
 				depth.current++;
 				setDragging(true);
 				setNotice("");
+				clearError();
 			}}
 			onDragOver={(event) => {
 				if (!hasFiles(event)) return;
@@ -61,7 +68,19 @@ export function FilePathDropZone({ children, className, inert }: { children: Rea
 				event.stopPropagation();
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
-				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
+				if (!resolve) {
+					if (uploading) return;
+					setNotice(""); clearError();
+					const items = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
+					if (items.some((item) => { try { return item.webkitGetAsEntry?.()?.isDirectory === true; } catch { return false; } })) {
+						setNotice("Select files to upload. Folder uploads are not supported."); return;
+					}
+					const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");
+					const editor = focused && event.currentTarget.contains(focused) ? focused : event.currentTarget.querySelector<HTMLElement>("[data-file-path-default]");
+					if (!editor) { setNotice("Open a chat to upload files."); return; }
+					void uploadDrop(Array.from(event.dataTransfer.files), editor);
+					return;
+				}
 				// Inspect only the dropped item's type, never traverse its entries.
 				// Positively known directories get a durable trailing separator.
 				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
@@ -97,13 +116,13 @@ export function FilePathDropZone({ children, className, inert }: { children: Rea
 				<div data-testid="file-path-drop-indicator" className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85 p-6 text-center backdrop-blur-sm">
 					<div className="flex max-w-md flex-col items-center gap-3">
 						<FileSymlinkIcon className="size-8 text-primary" aria-hidden />
-						<span className="font-ui text-sm">{window.lh?.getPathForFile ? "Drop to attach file paths" : BROWSER_NOTICE}</span>
+						<span className="font-ui text-sm">{window.lh?.getPathForFile ? "Drop to attach file paths" : "Drop to upload files (up to 25 MB)"}</span>
 					</div>
 				</div>
 			)}
-			{notice && <div role="status" className="absolute bottom-2 left-1/2 z-50 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-md border bg-card px-3 py-2 font-ui text-xs shadow-sm">
-				<span>{notice}</span>
-				<button type="button" aria-label="Dismiss attachment notice" onClick={() => setNotice("")} className="shrink-0 rounded-sm p-1 hover:bg-accent"><XIcon className="size-3" aria-hidden /></button>
+			{status && <div role="status" className="absolute bottom-2 left-1/2 z-50 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-md border bg-card px-3 py-2 font-ui text-xs shadow-sm">
+				<span>{status}</span>
+				{!uploading && <button type="button" aria-label="Dismiss attachment notice" onClick={() => { setNotice(""); clearError(); }} className="shrink-0 rounded-sm p-1 hover:bg-accent"><XIcon className="size-3" aria-hidden /></button>}
 			</div>}
 		</main>
 	);

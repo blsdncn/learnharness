@@ -157,7 +157,9 @@ API environment values override saved keys. Packaged subscription refresh creden
 
 ### File access and external services
 
-Read-only file tools default to the server user's home, not a selected project or app data root. Walk exclusions reduce noise; they are not access authority. Session attachments carry local paths rather than uploads.
+Read-only file tools default to the server user's home, not a selected project or app data root. Walk exclusions reduce noise; they are not access authority. Desktop session attachments reference existing local paths. Browser attachments upload private copies first, then insert their server paths into the same draft; neither selection sends a turn or starts graph extraction.
+
+`POST /api/attachments` accepts at most 25 MiB of files per batch, with a 26 MiB bound on the actual multipart body. The authenticated remote gateway streams multipart requests through the existing desktop API capability. Files persist beneath `LH_DATA_DIR/uploads/`, in private batch/file directories, with exclusive file creation and original safe basenames. Duplicate names never replace prior files. Failed writes remove only their own batch. Existing source-access restrictions and protected-location rules are checked before copying; uploads never change preferences to grant access. Uploads remain available across sessions and restarts, including files not ultimately sent, and are included in profile backups. They are not served from `public/` or automatically removed by session deletion.
 
 The **sensitive-path guard** refuses known private home locations, `.env` files, configured auth/subscription files, and recognized credential temporary files. It checks named/canonical paths and aliases; walks skip protected locations. It is path-based defense in depth, not a content scanner, sandbox, or allowed-folders setting. Other sensitive files and learning records can remain readable. See [`fs-shared.ts`](../src/agent/tools/fs-shared.ts).
 
