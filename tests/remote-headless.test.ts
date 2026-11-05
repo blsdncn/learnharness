@@ -77,6 +77,12 @@ http.createServer((req,res) => {
 	const grant = new URLSearchParams(new URL(pair.pairingUrl).hash.slice(1)).get("grant");
 	const paired = await gateway("/_lh/remote/pair", { origin, "content-type": "application/json" }, { grant });
 	assert.equal(paired.status, 200);
+	const logged = t.mock.method(console, "log", () => {});
+	assert.equal((await gateway("/_lh/remote/pair", { origin, "content-type": "application/json" }, { grant })).status, 401);
+	const lines = logged.mock.calls.map((call) => String(call.arguments[0]));
+	logged.mock.restore();
+	assert.ok(lines.includes("remote pairing rejected: no-pending"), "pairing rejection reasons reach the service journal");
+	assert.equal(lines.some((line) => line.includes(grant!)), false, "the journal never receives the grant");
 	const headers = { "x-learnharness-remote": JSON.parse(paired.body).token };
 	assert.equal((await gateway("/api/settings", headers)).status, 200);
 	assert.equal((await gateway("/api/remote/pair", { ...headers, origin }, {})).status, 403);

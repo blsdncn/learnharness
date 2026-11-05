@@ -73,7 +73,9 @@ async function serve({ createRemote = createRemoteAccess, createChat = createHea
 	const statePath = path.join(stateDir, "remote-access.json");
 	let desired = true;
 	if (fs.existsSync(statePath)) desired = JSON.parse(fs.readFileSync(statePath, "utf8")).enabled === true;
-	const remote = createRemote({ upstream, desktopSecret, statePath });
+	// The gateway's diagnostics (pairing rejection reasons, rejected ingress)
+	// carry no credential material; send them to the service journal.
+	const remote = createRemote({ upstream, desktopSecret, statePath, log: (line) => console.log(line) });
 	let child, relay, chatRelay, nativeRelay, chat, control, retry;
 	let ownsSocket = false;
 	let stopping;
