@@ -233,6 +233,31 @@ describe("General update rows", () => {
 });
 
 describe("Settings integration", () => {
+	it("retains file-access diagnostics from loading and queued settings replies until the server clears them", async () => {
+		bridge();
+		let writes = 0;
+		const initialError = "File-access configuration is blocked until repaired.";
+		const savedError = "File-access configuration remains blocked.";
+		globalThis.fetch = async (input, init) => {
+			const url = String(input);
+			if (url === "/api/models") return Response.json({ models: [], slots: { strong: null, cheap: null, vision: null } });
+			if (url === "/api/search") return Response.json({ available: false, engine: null, reason: "No search engine is configured." });
+			if (url === "/api/keys") return Response.json({ keys: [] });
+			if (url === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
+			if (init?.method === "PUT") {
+				writes++;
+				return Response.json({ settings: { version: 1, agent: JSON.parse(String(init.body)) }, ...(writes === 1 ? { fileAccessError: savedError } : {}) });
+			}
+			return Response.json({ settings: { version: 1 }, fileAccessError: initialError });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="agent" onClose={() => {}} />);
+		assert.equal(q(host, "file-access-config-error")?.textContent, initialError);
+		await click(q(host, "toggle-tool-research"));
+		assert.equal(q(host, "file-access-config-error")?.textContent, savedError);
+		await click(q(host, "toggle-tool-research"));
+		assert.equal(q(host, "file-access-config-error"), null);
+	});
+
 	it("the toggle sends the complete General section and follows stored server truth", async () => {
 		bridge();
 		// A synthetic future sibling exercises the caller's section-preserving

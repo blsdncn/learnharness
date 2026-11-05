@@ -165,6 +165,7 @@ export function SettingsDialogBody({
 	const visibleRecord = useRef<UserSettings | null>(null);
 	const sectionWrites = useRef<Partial<Record<WritableSection, PendingSectionWrite[]>>>({});
 	const [error, setError] = useState<string | null>(null);
+	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -222,12 +223,13 @@ export function SettingsDialogBody({
 				if (!live) return;
 				const response = await fetch("/api/settings");
 				if (!response.ok) throw new Error(`status ${response.status}`);
-				const body = await response.json() as { settings: UserSettings | null };
+				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
 				if (!live) return;
 				const loaded = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
 				confirmedRecord.current = loaded;
 				visibleRecord.current = loaded;
 				setRecord(loaded);
+				setFileAccessError(body.fileAccessError ?? null);
 			} catch {
 				if (live) setRecord(null);
 			}
@@ -297,7 +299,9 @@ export function SettingsDialogBody({
 							const detail = (await res.json().catch(() => ({}))) as { error?: string };
 							setError(`${section}: ${detail.error ?? res.status}`);
 						} else {
-							const stored = ((await res.json().catch(() => null)) as { settings?: UserSettings } | null)?.settings;
+							const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+							const stored = reply?.settings;
+							setFileAccessError(reply?.fileAccessError ?? null);
 							// Only this section belongs to this response: other sections
 							// may have newer writes or pending edits of their own.
 							const saved = stored && section in stored ? stored[section] : body;
@@ -461,6 +465,7 @@ export function SettingsDialogBody({
 								>
 									<AgentSection
 										agent={record.agent}
+										fileAccessError={fileAccessError}
 										models={record.models}
 										graph={record.graph}
 										compaction={record.compaction}
