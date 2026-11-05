@@ -38,7 +38,7 @@ import { isTypingSurface, kbdEventForAction, type SpeechSettings, type SpeechSta
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { LISTEN_RATES, ListenController, startAutoplayTurn, type ListenSnapshot } from "./listen-controller";
-import { LISTEN_ROOT_ATTR, adjacentAcross, adjacentBlock, blockFor, blockLabel, blocksIn, dockRoot, isCollapsed, rootOf, anchorFor, connectedRoot, resolveAnchor, type ListenAnchor } from "./speech-dom";
+import { LISTEN_DOCK_CLOSED_ATTR, LISTEN_OPEN_DOCK_EVENT, LISTEN_ROOT_ATTR, adjacentBlock, blockFor, blockLabel, blocksIn, dockRoot, isCollapsed, rootOf, anchorFor, connectedRoot, resolveAnchor, type ListenAnchor } from "./speech-dom";
 
 /** The keyboard surface while focused: the selected block (apart from
  *  playback), the root browsing started in, and a focus request count. */
@@ -183,13 +183,34 @@ function initialSelection(controller: ListenController): Element | null {
 	return dock ? (blocksIn(dock)[0] ?? null) : null;
 }
 
-/** Browse one block from `at`: through the root browsing started in, and
- *  with "Read the question" on across into the dock the way a read
- *  crosses (speech-dom adjacentAcross). Null at either end. */
-function browseFrom(at: Element, start: Element | null, dir: 1 | -1, readQuestion: boolean): Element | null {
-	if (readQuestion && start?.isConnected) return adjacentAcross(at, start, dir);
+/** Browse one block from `at` within its root; past the transcript's last
+ *  block into the dock's first, and from the dock's first back up to the
+ *  transcript's last — whatever "Read the question" is set to (owner,
+ *  2026-11-05; continuous reading keeps adjacentAcross's rules). Null at
+ *  either end. */
+function browseFrom(at: Element, dir: 1 | -1): Element | null {
 	const root = rootOf(at);
-	return root ? adjacentBlock(at, root, dir) : null;
+	if (!root) return null;
+	const near = adjacentBlock(at, root, dir);
+	if (near) return near;
+	const kind = root.getAttribute(LISTEN_ROOT_ATTR);
+	if (dir === 1 && kind === "transcript") {
+		const dock = dockRoot(at.ownerDocument);
+		return dock ? (blocksIn(dock)[0] ?? null) : null;
+	}
+	if (dir === -1 && kind === "dock") {
+		const transcript = at.ownerDocument.querySelector(`[${LISTEN_ROOT_ATTR}="transcript"]`);
+		return transcript ? (blocksIn(transcript).at(-1) ?? null) : null;
+	}
+	return null;
+}
+
+/** Browsing down into a folded dock opens it the way a click on its bar
+ *  does (scrolls to the bottom; reveals a waiting teach check). */
+function openDockFor(from: Element, to: Element) {
+	const dock = rootOf(to);
+	if (dock?.getAttribute(LISTEN_ROOT_ATTR) !== "dock" || rootOf(from) === dock) return;
+	if (dock.hasAttribute(LISTEN_DOCK_CLOSED_ATTR)) window.dispatchEvent(new CustomEvent(LISTEN_OPEN_DOCK_EVENT));
 }
 
 /** Bring a browsed transcript block on screen — never the dock's. */
@@ -543,9 +564,10 @@ export function ListenPill({ className }: { className?: string }) {
 			if (selected !== at.selected) api.select(selected);
 			if (key === "ArrowUp" || key === "ArrowDown") {
 				if (!selected) return api.select(initialSelection(reader));
-				const next = browseFrom(selected, connectedRoot(at.root), key === "ArrowDown" ? 1 : -1, reader.readQuestion);
+				const next = browseFrom(selected, key === "ArrowDown" ? 1 : -1);
 				if (!next) return;
 				api.select(next);
+				openDockFor(selected, next);
 				reveal(next);
 			} else if (key === "Enter") {
 				if (selected) reader.playFrom(selected);

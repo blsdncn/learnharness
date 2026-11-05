@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { probeArrivalExpanded, revealArrival, shouldStampGeometryMute } from "../components/chat.tsx";
+import { listenDockOpen, probeArrivalExpanded, revealArrival, shouldStampGeometryMute } from "../components/chat.tsx";
 
 /**
  * Teach-question arrival states (owner ruling, scroll-honesty round
@@ -58,5 +58,25 @@ describe("probeArrivalExpanded — how a probe question lands", () => {
 
 	it("scrolled up in history: arrive already-collapsed (owner ruling)", () => {
 		assert.equal(probeArrivalExpanded(false), false);
+	});
+});
+/**
+ * The listening player's ↓ past the transcript's last block (owner,
+ * 2026-11-05): a folded dock opens with the same handler as a click on its
+ * bar — the question's (which also accepts a teach reveal) or the
+ * practice problem's. An open dock, or a composer, has nothing to open.
+ */
+describe("listenDockOpen — what the player's ↓ opens", () => {
+	it("a folded question opens through the question bar's handler, even with practice also active", () => {
+		assert.equal(listenDockOpen({ expanded: false, question: true, practice: false }), "question");
+		assert.equal(listenDockOpen({ expanded: false, question: true, practice: true }), "question");
+	});
+	it("a folded practice problem opens through the practice bar's handler", () => {
+		assert.equal(listenDockOpen({ expanded: false, question: false, practice: true }), "practice");
+	});
+	it("an open dock or a plain composer opens nothing", () => {
+		assert.equal(listenDockOpen({ expanded: true, question: true, practice: false }), null);
+		assert.equal(listenDockOpen({ expanded: true, question: false, practice: true }), null);
+		assert.equal(listenDockOpen({ expanded: false, question: false, practice: false }), null);
 	});
 });

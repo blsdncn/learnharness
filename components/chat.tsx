@@ -87,7 +87,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { ListenPill, useListen } from "@/components/listen/listen";
-import { LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR, listenSourceProps } from "@/components/listen/speech-dom";
+import { LISTEN_DOCK_CLOSED_ATTR, LISTEN_OPEN_DOCK_EVENT, LISTEN_ROOT_ATTR, LISTEN_SKIP_ATTR, LISTEN_YOURS_ATTR, listenSourceProps } from "@/components/listen/speech-dom";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -1947,6 +1947,14 @@ export function revealArrival(wasQuestion: boolean): { expanded: boolean; reveal
 	return wasQuestion ? { expanded: true, revealed: true } : { expanded: false, revealed: false };
 }
 
+/** What the listening player's ↓ into a folded dock opens — the same
+ *  handler as a click on that dock's bar — or null when the dock is open
+ *  or holds only the composer. Non-null also marks the dock root closed. */
+export function listenDockOpen(s: { expanded: boolean; question: boolean; practice: boolean }): "question" | "practice" | null {
+	if (s.expanded) return null;
+	return s.question ? "question" : s.practice ? "practice" : null;
+}
+
 /**
  * A PROBE question's arrival state (flicker round, 2026-09-26): open iff
  * the learner is at the bottom following along; scrolled up in history →
@@ -2272,6 +2280,25 @@ function DockOverlay({
 	};
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
+	const expandPractice = () => {
+		setExpanded(true);
+		void suppressFoldDuringReveal();
+	};
+	// The listening player's ↓ past the transcript's last block (owner,
+	// 2026-11-05): a folded dock opens exactly as a click on its bar would.
+	const expandPracticeRef = useRef(expandPractice);
+	expandPracticeRef.current = expandPractice;
+	const dockOpen = listenDockOpen({ expanded, question: !!pending, practice: !!practice });
+	const dockOpenRef = useRef(dockOpen);
+	dockOpenRef.current = dockOpen;
+	useEffect(() => {
+		const onOpen = () => {
+			if (dockOpenRef.current === "question") expandAndRevealRef.current();
+			else if (dockOpenRef.current === "practice") expandPracticeRef.current();
+		};
+		window.addEventListener(LISTEN_OPEN_DOCK_EVENT, onOpen);
+		return () => window.removeEventListener(LISTEN_OPEN_DOCK_EVENT, onOpen);
+	}, []);
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
 	// invitation or collapsed by scroll — Enter is never dead. Any live
@@ -2440,6 +2467,7 @@ function DockOverlay({
 							ref={contentRef}
 							key={mode}
 							{...{ [LISTEN_ROOT_ATTR]: "dock" }}
+							{...(dockOpen ? { [LISTEN_DOCK_CLOSED_ATTR]: "" } : {})}
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pending ? (
@@ -2463,10 +2491,7 @@ function DockOverlay({
 									problemCallId={practice.toolCallId}
 									input={practice.input as { statement: string }}
 									expanded={expanded}
-									onExpand={() => {
-										setExpanded(true);
-										void suppressFoldDuringReveal();
-									}}
+									onExpand={expandPractice}
 									onSubmit={onSubmitThinking}
 									onEscape={dictationCancel}
 									compactionRunning={compactionRunning}

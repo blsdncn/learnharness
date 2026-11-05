@@ -1,4 +1,4 @@
-import React, { act, useEffect, useRef } from "react";
+import React, { act, useEffect, useRef, useState } from "react";
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
@@ -10,9 +10,9 @@ import type { ListenController } from "../components/listen/listen-controller";
 import { QuestionDock } from "../components/question-dock";
 import { PracticeDock } from "../components/practice-dock";
 import { AnsweredCard } from "../components/answered-card";
-import { escAbortTarget, type EscAbortTarget } from "../components/chat";
+import { escAbortTarget, listenDockOpen, type EscAbortTarget } from "../components/chat";
 import { setDictationActive } from "../components/dictation-state";
-import { listenSourceProps } from "../components/listen/speech-dom";
+import { LISTEN_DOCK_CLOSED_ATTR, LISTEN_OPEN_DOCK_EVENT, listenSourceProps } from "../components/listen/speech-dom";
 import { buildAnswer, type QuestionAnswerData, type QuizToolInput } from "../src/core/question-core";
 import type { SpeechSettings } from "../src/core";
 import { FakeAudio, replaceProperties } from "./helpers/browser";
@@ -42,6 +42,8 @@ describe("the listening keyboard surface", () => {
 	let escTargets: EscAbortTarget[];
 	let gate: { pending: boolean; busy: boolean };
 	let scrolled: Element[];
+	/** Requests the player made to open a folded dock. */
+	let openRequests: number;
 	let focused: Element | null;
 	let rects: Map<string, { top: number; height: number }>;
 
@@ -143,7 +145,7 @@ describe("the listening keyboard surface", () => {
 
 	const QUIZ = { question: "Which is right?", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes." } as unknown as QuizToolInput;
 
-	interface Scene { paragraphs?: { id: string; text: string; key?: string; source?: string; part?: string }[]; answer?: QuestionAnswerData; question?: boolean; onAnswer?: () => void; practice?: { expanded: boolean }; collapsed?: boolean; popup?: () => void; transcriptKey?: string }
+	interface Scene { paragraphs?: { id: string; text: string; key?: string; source?: string; part?: string }[]; answer?: QuestionAnswerData; question?: boolean; onAnswer?: () => void; practice?: { expanded: boolean }; folded?: { kind: "question" | "practice"; reveal?: boolean }; collapsed?: boolean; popup?: () => void; transcriptKey?: string }
 	const PARAGRAPHS = [
 		{ id: "t1", text: "First paragraph." },
 		{ id: "t2", text: "Second paragraph." },
@@ -151,9 +153,24 @@ describe("the listening keyboard surface", () => {
 	];
 	let submitted: number;
 
-	function Session({ paragraphs = PARAGRAPHS, answer, question = false, onAnswer, practice, collapsed = true, popup, transcriptKey = "transcript" }: Scene) {
+	function Session({ paragraphs = PARAGRAPHS, answer, question = false, onAnswer, practice, folded, collapsed = true, popup, transcriptKey = "transcript" }: Scene) {
 		listenApi = useListen();
 		controller = listenApi.controller;
+		// A folded dock, wired the way Chat's DockOverlay wires it around the
+		// real listenDockOpen: the closed marker on the dock root, and the
+		// player's open request handled as the bar's click.
+		const [open, setOpen] = useState(false);
+		const dockOpen = folded ? listenDockOpen({ expanded: open, question: folded.kind === "question", practice: folded.kind === "practice" }) : null;
+		const dockOpenRef = useRef(dockOpen);
+		dockOpenRef.current = dockOpen;
+		useEffect(() => {
+			const onOpen = () => {
+				openRequests++;
+				if (dockOpenRef.current) setOpen(true);
+			};
+			window.addEventListener(LISTEN_OPEN_DOCK_EVENT, onOpen);
+			return () => window.removeEventListener(LISTEN_OPEN_DOCK_EVENT, onOpen);
+		}, []);
 		const paragraph = (p: NonNullable<Scene["paragraphs"]>[number]) => p.source
 			? <div key={p.key ?? p.id} data-source-message-id={p.source} {...listenSourceProps("text", p.part)}><p id={p.id}>{p.text}</p></div>
 			: <p key={p.key ?? p.id} id={p.id}>{p.text}</p>;
@@ -165,8 +182,12 @@ describe("the listening keyboard surface", () => {
 					{paragraphs.slice(2).map(paragraph)}
 					{answer && <AnsweredCard answer={answer} />}
 				</div>
-				<div data-listen-root="dock" id="dock">
-					{practice ? (
+				<div data-listen-root="dock" id="dock" {...(dockOpen ? { [LISTEN_DOCK_CLOSED_ATTR]: "" } : {})}>
+					{folded?.kind === "question" ? (
+						<QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded={open} reveal={!!folded.reveal && !open} onExpand={() => setOpen(true)} onSubmit={() => { submitted++; }} dictationClaim={false} />
+					) : folded?.kind === "practice" ? (
+						<PracticeDock problemCallId="p1" input={{ statement: "Practice statement." }} expanded={open} onExpand={() => setOpen(true)} onSubmit={() => { submitted++; }} />
+					) : practice ? (
 						<PracticeDock problemCallId="p1" input={{ statement: "Practice statement." }} expanded={practice.expanded} onExpand={() => {}} onSubmit={() => { submitted++; }} />
 					) : question ? (
 						<QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}} onSubmit={() => { submitted++; onAnswer?.(); }} dictationClaim={false} />
@@ -228,6 +249,7 @@ describe("the listening keyboard surface", () => {
 		escTargets = [];
 		gate = { pending: false, busy: false };
 		scrolled = [];
+		openRequests = 0;
 		focused = null;
 		rects = new Map();
 		submitted = 0;
@@ -359,7 +381,8 @@ describe("the listening keyboard surface", () => {
 		await press("ArrowDown");
 		assert.equal(status(), "Reading: Third paragraph.", "the collapsed detail is never selected");
 		await press("ArrowDown");
-		assert.equal(status(), "Reading: Third paragraph.", "clamped at the end (Read the question off)");
+		assert.equal(status(), "Reading: Third paragraph.", "clamped at the end: a composer dock has nothing to read");
+		assert.equal(openRequests, 0, "no folded dock: nothing is asked to open");
 		assert.equal(reading().status, "idle");
 		assert.deepEqual(spoken, [], "browsing synthesizes nothing");
 	});
@@ -389,6 +412,65 @@ describe("the listening keyboard surface", () => {
 		await press("ArrowUp");
 		assert.equal(status(), "Reading: Third paragraph.", "back up into the transcript, as Previous crosses");
 		assert.deepEqual(spoken, []);
+	});
+
+	for (const reveal of [false, true]) {
+		it(`↓ past the last block opens a folded question${reveal ? " behind its teach reveal" : ""} and selects its first block, Read the question off`, async () => {
+			await mount({ folded: { kind: "question", reveal } });
+			assert.ok($(reveal ? '[data-testid="teach-check-reveal"]' : '[data-testid="question-dock-bar"]'), "starts folded into its bar");
+			assert.equal($("#dock")!.hasAttribute(LISTEN_DOCK_CLOSED_ATTR), true);
+			await focusListening();
+			await press("ArrowDown");
+			await press("ArrowDown");
+			assert.equal(status(), "Reading: Third paragraph.");
+			assert.equal(openRequests, 0, "browsing the transcript opens nothing");
+			await press("ArrowDown");
+			assert.match(status()!, /^Question: Which is right\?/, "the dock's first readable block");
+			assert.equal(openRequests, 1, "asked to open exactly once");
+			assert.equal($('[data-testid="question-dock-bar"]') ?? $('[data-testid="teach-check-reveal"]'), null, "opened, as a click on its bar does");
+			assert.equal($("#dock")!.hasAttribute(LISTEN_DOCK_CLOSED_ATTR), false);
+			assert.ok(surface()!.contains(document.activeElement), "focus stays on the player");
+			await press("ArrowDown");
+			assert.match(status()!, /^Options:/);
+			assert.equal(openRequests, 1, "moving within the dock asks nothing more");
+			await press("ArrowUp");
+			await press("ArrowUp");
+			assert.equal(status(), "Reading: Third paragraph.", "↑ from the dock's first block returns to the transcript's last");
+			assert.deepEqual(spoken, [], "browsing synthesizes nothing");
+		});
+	}
+
+	it("↓ past the last block opens a folded practice problem; Enter reads the opened statement", async () => {
+		await mount({ folded: { kind: "practice" } });
+		assert.ok($('[data-testid="practice-dock-bar"]'));
+		await focusListening();
+		await press("ArrowDown");
+		await press("ArrowDown");
+		await press("ArrowDown");
+		assert.equal(status(), "Problem: Practice statement.");
+		assert.equal(openRequests, 1);
+		assert.equal($('[data-testid="practice-dock-bar"]'), null, "the practice problem opened");
+		assert.ok($('[data-testid="practice-dock"]'));
+		await press("Enter");
+		assert.equal(spoken[0], "Practice statement.", "the selection followed the statement into the opened form");
+		assert.equal(submitted, 0);
+	});
+
+	it("an open dock is entered without an open request, Read the question off; ↑ returns from a dock read", async () => {
+		await mount({ question: true });
+		await focusListening();
+		await press("ArrowDown");
+		await press("ArrowDown");
+		await press("ArrowDown");
+		assert.match(status()!, /^Question: Which is right\?/);
+		assert.equal(openRequests, 0, "nothing to open");
+		await press("Escape");
+		await act(async () => controller!.playFrom($('[data-listen-block="Question"]')!));
+		await settle();
+		await focusListening();
+		assert.match(status()!, /^Question:/, "the selection starts on what is reading, in the dock");
+		await press("ArrowUp");
+		assert.equal(status(), "Reading: Third paragraph.", "↑ crosses back even when browsing started in the dock");
 	});
 
 	it("an initial dock selection stays in the dock", async () => {
