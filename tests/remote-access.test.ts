@@ -84,7 +84,11 @@ test("Home Screen web apps can pair by pasting a link or bare grant", async (t) 
 	assert.equal(grant.length, 43);
 	assert.equal(parsePairingInput(`  https://learn.test.ts.net:8443/_lh/remote/pair#grant=${grant}\n`), grant);
 	assert.equal(parsePairingInput(grant), grant);
-	for (const bad of ["", "hello", grant.slice(1), grant + "a", `${grant.slice(0, 42)}!`, "https://learn.test.ts.net:8443/_lh/remote/pair", `https://x.invalid/?grant=${grant}`]) assert.equal(parsePairingInput(bad), null, bad);
+	const link = `https://learn.test.ts.net:8443/_lh/remote/pair#grant=${grant}`;
+	for (const copied of [`=${grant}`, `grant=${grant}`, `#grant=${grant}`, `${grant}"`, `${grant}",`, `"${grant}"`,
+		`${grant.slice(0, 20)}\n${grant.slice(20)}`, `${grant.slice(0, 20)} ${grant.slice(20)}`, `${grant.slice(0, 9)}\r\n  ${grant.slice(9, 30)}\n${grant.slice(30)}`,
+		`"pairingUrl": "${link}",`, `${link.slice(0, 50)}\n${link.slice(50)}",`]) assert.equal(parsePairingInput(copied), grant, JSON.stringify(copied));
+	for (const bad of ["", "hello", "grant=", grant.slice(1), grant + "a", `${grant.slice(0, 42)}!`, `${grant.slice(0, 20)}.${grant.slice(20)}`, "https://learn.test.ts.net:8443/_lh/remote/pair", `${link}x`]) assert.equal(parsePairingInput(bad), null, bad);
 
 	const page = pairingPage("n0nce");
 	assert.match(page, /<label for="link">Paste pairing link or code<\/label><input id="link"[^>]*autocapitalize="off"[^>]*autocorrect="off"[^>]*spellcheck="false"/);

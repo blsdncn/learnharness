@@ -1,16 +1,15 @@
 "use strict";
 
-/** Accepts a whole pairing link or its bare 43-character grant; returns null
- * for anything else. Embedded verbatim into the page script below. */
+/** Accepts a whole pairing link or its bare 43-character grant, tolerating
+ * what copying from a terminal adds: spaces or line breaks from wrapping, a
+ * leading "=" or "grant=", and quotes or commas from the JSON output. Returns
+ * null for anything else. Embedded verbatim into the page script below. */
 function parsePairingInput(text) {
-	const grantPattern = /^[A-Za-z0-9_-]{43}$/;
-	const value = String(text).trim();
-	if (grantPattern.test(value)) return value;
-	try {
-		const grant = new URLSearchParams(new URL(value).hash.slice(1)).get("grant");
-		if (grant && grantPattern.test(grant)) return grant;
-	} catch {}
-	return null;
+	let value = String(text).replace(/\s+/g, "");
+	const marker = value.lastIndexOf("grant=");
+	if (marker !== -1) value = value.slice(marker + "grant=".length);
+	value = value.replace(/^[="',]+|["',]+$/g, "");
+	return /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
 }
 
 /** The grant is read from the fragment (or pasted, for Home Screen web apps
