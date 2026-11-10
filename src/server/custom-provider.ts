@@ -13,6 +13,7 @@ import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { customBindingMatches } from "../core/custom-provider-auth.ts";
 import { customAuthState, customKeyAuthorized } from "./custom-provider-auth.ts";
+import { unixSocketFetch } from "./unix-socket-fetch.ts";
 import {
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
@@ -90,6 +91,7 @@ function toPiModel(
 /** Build an OpenAI-compatible provider from parts. baseUrl must be normalized. */
 export function buildOpenAiCompatibleProvider(input: {
 	baseUrl: string;
+	socketPath?: string;
 	models: readonly CustomModel[];
 	/** User pins by model id (see CustomModelOverride) — absent = none. */
 	overrides?: Record<string, CustomModelOverride>;
@@ -97,6 +99,8 @@ export function buildOpenAiCompatibleProvider(input: {
 	apiKey?: string;
 }): Provider<Api> {
 	const overrides = input.overrides ?? {};
+	const api = openAICompletionsApi();
+	const socketFetch = input.socketPath === undefined ? undefined : unixSocketFetch(input.socketPath, input.baseUrl);
 	return createProvider<Api>({
 		id: CUSTOM_PROVIDER.id,
 		name: CUSTOM_PROVIDER.label,
@@ -106,7 +110,10 @@ export function buildOpenAiCompatibleProvider(input: {
 			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? CUSTOM_PROVIDER.envVar : "keyless" }),
 		} },
 		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides)),
-		api: openAICompletionsApi(),
+		api: socketFetch ? {
+			stream: (model, context, options) => api.stream(model, context, { ...options, fetch: socketFetch }),
+			streamSimple: (model, context, options) => api.streamSimple(model, context, { ...options, fetch: socketFetch }),
+		} : api,
 	});
 }
 
@@ -126,14 +133,15 @@ export type DiscoverResult =
 /** Probe GET {baseUrl}/models for model ids. Scheme validated (http/https
  *  only); keyless endpoints answer without a bearer. Non-2xx or unparseable
  *  body → honest error, never a silent empty list. */
-export async function discoverModels(baseUrl: string, apiKey?: string): Promise<DiscoverResult> {
+export async function discoverModels(baseUrl: string, apiKey?: string, socketPath?: string): Promise<DiscoverResult> {
 	const base = normalizeBaseUrl(baseUrl);
 	if (!base) return { ok: false, error: "Base URL must be a valid http(s) URL" };
 	const key = apiKey?.trim();
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 15_000);
 	try {
-		const res = await fetch(`${base}/models`, {
+		const request = socketPath === undefined ? fetch : unixSocketFetch(socketPath, base);
+		const res = await request(`${base}/models`, {
 			headers: key ? { authorization: `Bearer ${key}` } : {},
 			signal: controller.signal,
 			redirect: "manual",

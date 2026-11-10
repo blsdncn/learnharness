@@ -11,10 +11,10 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, Element:
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
 let host: HTMLElement | undefined;
-async function mount(setup = false) {
+async function mount(setup = false, socketPath?: string) {
 	globalThis.fetch = async (input, init) => {
 		assert.equal(init?.method ?? "GET", "GET", "polish interactions must not save credentials/settings");
-		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", ...(socketPath === undefined ? {} : { socketPath }), authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
 		return Response.json({ keys: [], providers: [] });
 	};
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -49,3 +49,38 @@ test("model controls use approved effort labels, right-align Save limits, and gr
 	const children = Array.from(element("custom-endpoint-editor").children); assert.ok(children.indexOf(help) > children.indexOf(element("custom-pins")));
 	assert.match(help.textContent ?? "", /do not resize backend context/); assert.match(help.textContent ?? "", /Off may not disable/);
 });
+
+for (const setup of [false, true]) {
+ test(`${setup ? "Setup" : "Settings"} selects and restores Unix socket transport`, async () => {
+  await mount(setup, "/run/fixture.sock");
+  assert.equal(element("custom-socket-input").getAttribute("value"), "/run/fixture.sock");
+  const select = element("custom-transport");
+  Object.defineProperty(select, "value", { value: "tcp", configurable: true });
+  await act(async () => select.dispatchEvent(new dom.window.Event("change", { bubbles: true })));
+  assert.equal(document.querySelector('[data-testid="custom-socket-input"]'), null);
+  Object.defineProperty(select, "value", { value: "unix", configurable: true });
+  await act(async () => select.dispatchEvent(new dom.window.Event("change", { bubbles: true })));
+  assert.equal(element("custom-socket-input").getAttribute("value"), "/run/fixture.sock");
+ });
+}
+
+for (const transport of ["unix", "tcp"]) {
+	test(`saving ${transport} transport sends only its selected socket configuration`, async () => {
+		await mount(false, "/run/fixture.sock");
+		if (transport === "tcp") {
+			const select = element("custom-transport");
+			Object.defineProperty(select, "value", { value: "tcp", configurable: true });
+			await act(async () => select.dispatchEvent(new dom.window.Event("change", { bubbles: true })));
+		}
+		const read = globalThis.fetch;
+		const saves: Record<string, unknown>[] = [];
+		globalThis.fetch = async (input, init) => {
+			if (init?.method === "POST") { saves.push(JSON.parse(String(init.body))); return Response.json({ ok: true }); }
+			return read(input, init);
+		};
+		await click("custom-save");
+		assert.equal(saves.length, 1);
+		assert.equal(saves[0]!.baseUrl, "http://fixture.invalid/v1");
+		assert.equal(saves[0]!.socketPath, transport === "unix" ? "/run/fixture.sock" : undefined);
+	});
+}

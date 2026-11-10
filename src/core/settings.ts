@@ -264,6 +264,8 @@ export interface CustomProviderSettings {
 	authMode?: "keyless" | "apiKey";
 	/** Normalized base URL (see normalizeBaseUrl). Empty/absent = not configured. */
 	baseUrl?: string;
+	/** Present selects HTTP over a filesystem Unix socket on the app host. */
+	socketPath?: string;
 	/** Models this endpoint offers: advertised ids merged with the typed
 	 *  manual ones (rewritten on connect; a failed probe keeps the same
 	 *  endpoint's last snapshot). */
@@ -299,12 +301,18 @@ export function normalizeBaseUrl(raw: string): string {
 	return url.toString().replace(/\/+$/, "");
 }
 
-/** THE single source of "is the custom endpoint usable?": a non-empty base URL.
+/** Preserve the exact filesystem address; never expand ~ or environment values. */
+export function normalizeSocketPath(raw: unknown): string {
+	return typeof raw === "string" && raw.startsWith("/") && raw.length > 1 && !raw.includes("\0") && raw.trim() === raw ? raw : "";
+}
+
+/** THE single source of "is the custom endpoint usable?": base URL plus a
+ *  valid plain-HTTP socket selection, when present.
  *  Key presence is deliberately excluded (keyless local servers are allowed). */
 export function customProviderUsable(
 	cp: CustomProviderSettings | undefined,
 ): cp is CustomProviderSettings & { baseUrl: string } {
-	return Boolean(cp?.baseUrl);
+	return Boolean(cp?.baseUrl && (cp.socketPath === undefined || (normalizeSocketPath(cp.socketPath) && cp.baseUrl.startsWith("http:"))));
 }
 
 /** First-run gate (model-slots wave, owner 2026-09-20): the app refuses
@@ -654,6 +662,8 @@ export function sanitizeCustomModelOverrides(
  *  true; token counts only as positive ints). Clamp-never-reject. */
 function sanitizeCustomProvider(raw: Record<string, unknown>): CustomProviderSettings {
 	const out: CustomProviderSettings = {};
+	// Preserve an invalid socket selection as unusable; never turn it into TCP.
+	if (raw.socketPath !== undefined) out.socketPath = normalizeSocketPath(raw.socketPath);
 	if (typeof raw.credentialBindingId === "string" && /^[a-f0-9]{32}$/.test(raw.credentialBindingId)) out.credentialBindingId = raw.credentialBindingId;
 	if (raw.authMode === "keyless" || raw.authMode === "apiKey") out.authMode = raw.authMode;
 	if (typeof raw.baseUrl === "string") {

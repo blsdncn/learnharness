@@ -5,16 +5,52 @@ LearnHarness supports **one custom OpenAI-compatible endpoint with multiple mode
 ## Connect
 
 1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or use the first-run provider picker.
-2. Enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. HTTP/HTTPS and private-network addresses are supported; embedded credentials, query strings, fragments, and discovery redirects are rejected.
+2. Choose **TCP** or **Unix socket** and enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. TCP supports HTTP/HTTPS and private-network addresses; embedded credentials, query strings, fragments, and discovery redirects are rejected. Unix socket setup is described below.
 3. Choose **Keyless** or **API key**. Keyless ignores saved/environment custom keys. API key uses `CUSTOM_OPENAI_API_KEY`; a real environment value overrides a saved value, and the editor identifies environment ownership.
 4. Optionally enter model IDs, separated by commas or whitespace, for servers without working model discovery.
 5. Click **Connect**, then select Strong, Cheap, and Vision models.
 
-A key is bound to the canonical endpoint URL and authentication mode. Changing the URL requires a new effective key or explicit consent to reuse it; it is never silently forwarded. Clearing authentication selects Keyless. Use this editor—not generic key management—to change custom credentials.
+A key is bound to the canonical endpoint URL, socket path (when selected), and authentication mode. Changing the URL, socket path, or transport requires a new effective key or explicit consent to reuse it; it is never silently forwarded. Clearing authentication selects Keyless. Use this editor—not generic key management—to change custom credentials.
 
 Connect requests `GET <base>/models`; reported metadata wins over duplicate entered IDs. A nonfatal discovery failure can fall back to entered IDs. At the same URL, fallback preserves the previous model snapshot/pins; a different URL starts its own snapshot. **401/403, redirects, response-size, and model-count violations fail even with entered IDs.** A failed connect without fallback leaves configuration unchanged.
 
 Discovery is not a continuous health or capability check. LearnHarness does not install a backend, download models, or perform custom-endpoint OAuth.
+
+## HTTP over a Unix socket
+
+On Linux or macOS, choose **Unix socket** in the same custom endpoint editor:
+
+- Socket path: the existing absolute filesystem path, for example `/run/llm.sock`.
+- Base URL: `http://localhost/v1`, or the HTTP Host and API prefix your server expects.
+- Authentication: the same Keyless or API key options as TCP.
+
+The socket must serve an OpenAI-compatible HTTP API, including streaming chat
+completions. The base URL supplies the Host header and request path; it does
+not cause a TCP connection. Both discovery and generation connect through the
+socket. Unix socket transport requires plain `http://`; TLS over sockets,
+abstract sockets, Windows named pipes, and WebSocket APIs are not supported.
+
+The socket is on the machine running LearnHarness, including when the UI is
+in another machine's browser. LearnHarness connects to an existing socket; it
+does not create/delete it or change its permissions. Relative paths, `~`, and
+environment-variable expansion are not supported. Missing or inaccessible
+sockets produce connection errors with no TCP fallback. Manual model IDs
+retain the existing offline-configuration behavior.
+
+You can check a keyless backend before connecting it:
+
+```sh
+curl --unix-socket /run/llm.sock http://localhost/v1/models
+```
+
+Socket configurations use a version 2 private credential binding. Existing TCP
+bindings remain compatible. Older builds reject the newer binding rather than
+reinterpreting the socket configuration as TCP; reconnect explicitly if you
+switch back to an older build. When an environment key changes sockets, a
+shadowed file key remains bound to its original socket.
+
+The transport uses a request-scoped [Undici dispatcher](https://undici.nodejs.org/api/Dispatcher)
+and leaves the existing provider's message encoding and SSE parser in place.
 
 ## Budgets and reasoning
 
@@ -38,7 +74,7 @@ Every custom-engine image-bearing request attempts delivery even when discovery 
 
 ## Editing, credentials, and recovery
 
-Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in `auth.json`. Authorization requires matching binding IDs, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
+Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in `auth.json`. Authorization requires matching binding IDs, URL, socket path, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
 
 If authorization is interrupted, reload and explicitly reconnect. An environment key changing endpoints does not authorize a shadowed saved key for that new URL. Disconnect prevents a latent environment key from reviving the provider. These are crash/restart guards, not a power-loss/fsync transaction guarantee.
 
@@ -59,3 +95,27 @@ The earlier unshipped `models.json` configuration is not read or migrated. Exist
 - [`agent/models.ts`](../src/agent/models.ts): per-operation engine resolution and image allowance.
 
 `tests/custom-provider-*.test.*` covers fake endpoints, binding/restart failures, concurrent editing, UI, and payload delivery—not backend installation or real-model capabilities.
+
+`tests/unix-socket-provider.test.ts` uses real filesystem sockets to check
+discovery, streaming, tool calls, cancellation, restart persistence, key
+binding, redirects, and absence of TCP fallback. After a production build and
+server curation, run `node scripts/smoke-unix-provider.mjs` to check discovery
+and synthetic chat generation in the built server, including restart. Use
+`--appimage /path/to/LearnHarness-Local-0.5.0-x86_64.AppImage` to exercise the
+packaged application instead; it needs a graphical session or Xvfb. All these
+checks use disposable profiles and a synthetic provider, not real inference.
+
+For this variation, follow the [AppImage build pipeline](localhost-appimage.md#build)
+and give Electron Builder a separate output directory:
+
+```sh
+npx electron-builder --config electron-builder.local.yml --linux AppImage --x64 --publish never -c.directories.output=dist/unix-socket
+```
+
+The resulting artifact is
+`dist/unix-socket/LearnHarness-Local-0.5.0-x86_64.AppImage`. Validation passed:
+90 custom-provider/socket/UI tests, 122 settings/authentication/API regression
+tests, and 28 native-rendering tests; production build, typecheck, and lint
+(one existing warning); standalone and actual AppImage discovery/chat over
+AF_UNIX before and after restart with zero TCP traffic; packaged provider and
+demo checks; and the existing AppImage desktop/localhost-forwarding smoke.

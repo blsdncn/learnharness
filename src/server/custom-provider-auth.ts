@@ -29,7 +29,7 @@ export function customAuthState(inspectKey = false, requiredConfig?: CustomProvi
 	} catch { return { readable: false, source: "none" }; }
 }
 export function customKeyAuthorized(cp: CustomProviderSettings | undefined, state: CustomAuthState): boolean {
-	return cp?.authMode === "apiKey" && state.readable && customBindingMatches(cp, state.binding) && Boolean(state.key) && (state.source === "env" || state.binding?.fileKeyBaseUrl === cp?.baseUrl);
+	return cp?.authMode === "apiKey" && state.readable && customBindingMatches(cp, state.binding) && Boolean(state.key) && (state.source === "env" || (state.binding?.fileKeyBaseUrl === cp?.baseUrl && state.binding?.fileKeySocketPath === cp?.socketPath));
 }
 /** Reflect only after the atomic pair is committed. Runtime file resolution
  * does not rely on this compatibility mirror, including after a failed write. */

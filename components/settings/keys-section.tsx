@@ -30,6 +30,7 @@ import {
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	CUSTOM_PROVIDER,
 	normalizeBaseUrl,
+	normalizeSocketPath,
 	type AuthKeyStatus,
 	type CustomModel,
 	type CustomModelOverride,
@@ -62,6 +63,7 @@ interface CustomStatus {
 	authMode: "keyless" | "apiKey";
 	keySource: "env" | "file" | "none";
 	baseUrl: string;
+	socketPath?: string;
 	models: CustomModel[];
 	/** User pins by model id (context / max output / thinking). */
 	overrides: Record<string, CustomModelOverride>;
@@ -73,7 +75,7 @@ async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
 	const response = await fetch(`/api/custom-provider${inspectKey ? "?authMode=apiKey" : ""}`);
 	if (!response.ok) throw new Error("Unable to load custom configuration.");
 	const cp = await response.json() as Partial<CustomStatus>;
-	return { keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
+	return { keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", ...(cp.socketPath === undefined ? {} : { socketPath: cp.socketPath }), models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -525,6 +527,7 @@ export function KeysSection({
 						keyReuseRequired0={custom?.keyReuseRequired ?? false}
 						onReload={async () => { await reload(); setAddingCustom(false); }}
 						baseUrl0={custom?.baseUrl ?? ""}
+						socketPath0={custom?.socketPath}
 						keyPresent={custom?.keyPresent ?? false}
 						models={custom?.models ?? []}
 						overrides={custom?.overrides ?? {}}
@@ -681,7 +684,7 @@ export function CustomEndpointSetup({ onSaved }: { onSaved: () => void | Promise
 	}
 	useEffect(() => { void reload(); }, []);
 	if (!status || error) return <div className="text-xs">{error ? "Unable to load custom configuration." : "Loading custom configuration…"}{error && <button onClick={() => void reload()}>Retry</button>}</div>;
-	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
+	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} socketPath0={status.socketPath} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
 }
 
 /** The custom endpoint's status row (shown once configured); clicking re-opens the editor. */
@@ -695,7 +698,7 @@ function CustomEndpointRow({
 	onToggle: () => void;
 }) {
 	const count = status.models.length;
-	const line = `${status.baseUrl} · ${count} model${count === 1 ? "" : "s"} · ${status.authMode === "keyless" ? "keyless" : status.keyPresent ? "API key" : "API key missing"}`;
+	const line = `${status.socketPath === undefined ? "" : `${status.socketPath} → `}${status.baseUrl} · ${count} model${count === 1 ? "" : "s"} · ${status.authMode === "keyless" ? "keyless" : status.keyPresent ? "API key" : "API key missing"}`;
 	return (
 		<div data-testid="custom-endpoint-row">
 			<button
@@ -760,7 +763,7 @@ const pinTestid = (prefix: string, id: string) => `${prefix}-${id.replace(/[^a-z
 function CustomEndpointEditor({
 	setup = false,
 	revision0, authMode0, keySource0, keyReuseRequired0, onReload,
-	baseUrl0,
+	baseUrl0, socketPath0,
 	keyPresent: initialKeyPresent,
 	models,
 	overrides,
@@ -777,6 +780,7 @@ function CustomEndpointEditor({
 	keyReuseRequired0: boolean;
 	onReload: () => void | Promise<void>;
 	baseUrl0: string;
+	socketPath0?: string;
 	keyPresent: boolean;
 	/** The discovered models — one limits row each. */
 	models: readonly CustomModel[];
@@ -811,6 +815,8 @@ function CustomEndpointEditor({
 		return () => { cancelled = true; };
 	}, [authMode]);
 	const [baseUrl, setBaseUrl] = useState(baseUrl0);
+	const [transport, setTransport] = useState(socketPath0 === undefined ? "tcp" : "unix");
+	const [socketPath, setSocketPath] = useState(socketPath0 ?? "");
 	const [key, setKey] = useState("");
 	const [keyTouched, setKeyTouched] = useState(false);
 	const [manualModels, setManualModels] = useState(manualModels0.join(", "));
@@ -822,8 +828,8 @@ function CustomEndpointEditor({
 	const [baseline, setBaseline] = useState(() => JSON.stringify(pinsPayload(draftsFor(models, overrides))));
 	const [pinsBusy, setPinsBusy] = useState(false);
 	const [pinsError, setPinsError] = useState<string | null>(null);
-	const changedTarget = normalizeBaseUrl(baseUrl) !== normalizeBaseUrl(baseUrl0);
-	const canConnect = Boolean(baseUrl.trim()) && (authMode === "keyless" || (!authLoading && ((Boolean(key.trim()) && keySource !== "env") || (keyPresent && (!(changedTarget || keyReuseRequired) || reuseKey)))));
+	const changedTarget = normalizeBaseUrl(baseUrl) !== normalizeBaseUrl(baseUrl0) || (transport === "unix" ? socketPath : undefined) !== socketPath0;
+	const canConnect = Boolean(baseUrl.trim()) && (transport === "tcp" || Boolean(normalizeSocketPath(socketPath) && normalizeBaseUrl(baseUrl).startsWith("http:"))) && (authMode === "keyless" || (!authLoading && ((Boolean(key.trim()) && keySource !== "env") || (keyPresent && (!(changedTarget || keyReuseRequired) || reuseKey)))));
 
 	const draftOf = (m: CustomModel): PinDraft => drafts[m.id] ?? pinDraft(overrides[m.id]);
 	const setDraft = (m: CustomModel, patch: Partial<PinDraft>) =>
@@ -863,7 +869,7 @@ function CustomEndpointEditor({
 		const res = await fetch("/api/custom-provider", {
 			method: "POST",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ baseUrl, authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
+			body: JSON.stringify({ baseUrl, ...(transport === "unix" ? { socketPath } : {}), authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -877,6 +883,15 @@ function CustomEndpointEditor({
 
 	return (
 		<div data-testid="custom-endpoint-editor" className="flex flex-col gap-2 rounded-sm px-1 py-1.5">
+			<label className="flex items-center gap-2 text-xs">Transport
+				<select aria-label="Custom endpoint transport" data-testid="custom-transport" value={transport} disabled={busy || pinsBusy} onChange={(e) => { setTransport(e.target.value); setReuseKey(false); }}>
+					<option value="tcp">TCP</option><option value="unix">Unix socket</option>
+				</select>
+			</label>
+			{transport === "unix" && <>
+				<input type="text" aria-label="Custom endpoint Unix socket path" data-testid="custom-socket-input" value={socketPath} onChange={(e) => { setSocketPath(e.target.value); setReuseKey(false); }} disabled={busy || pinsBusy} placeholder="Absolute socket path, e.g. /run/llm.sock" className="h-7 min-w-0 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground" />
+				<p className="text-[11px] text-muted-foreground">Socket on the machine running LearnHarness. Use an http:// base URL for the Host header and API path.</p>
+			</>}
 			<div className="flex items-center gap-2">
 				<span className="shrink-0 font-ui text-xs text-foreground">Custom endpoint</span>
 				<input
@@ -907,7 +922,7 @@ function CustomEndpointEditor({
 				</select>
 			</label>
 			{authMode === "apiKey" && keySource === "env" && <p className="text-[11px] text-muted-foreground" data-testid="custom-env-owned">Environment supplies the effective key. Change the environment to replace it.</p>}
-			{authMode === "apiKey" && keyPresent && (changedTarget || keyReuseRequired) && <label className="text-[11px]"><input type="checkbox" data-testid="custom-reuse-key" checked={reuseKey} onChange={(e) => setReuseKey(e.target.checked)} /> Allow reuse of the effective existing key for this URL</label>}
+			{authMode === "apiKey" && keyPresent && (changedTarget || keyReuseRequired) && <label className="text-[11px]"><input type="checkbox" data-testid="custom-reuse-key" checked={reuseKey} onChange={(e) => setReuseKey(e.target.checked)} /> Allow reuse of the effective existing key for this endpoint (URL and socket path)</label>}
 			<div className="flex items-center gap-2">
 				{authMode === "apiKey" && <input
 					type="password"

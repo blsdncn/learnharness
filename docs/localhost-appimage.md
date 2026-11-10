@@ -2,6 +2,8 @@
 
 This custom Linux x64 build starts from upstream v0.5.0. It adds optional
 localhost hosting, without the later TTS, remote-access, or light-mode changes.
+The `feat/v0.5.0-unix-socket-provider` variation additionally supports
+[custom providers over HTTP/Unix sockets](custom-providers.md#http-over-a-unix-socket).
 
 Launching normally opens the desktop UI. To run without an Electron window:
 
@@ -79,7 +81,7 @@ automatic browser opening, and shutdown using an isolated profile:
 LH_TEST_CHROME=/path/to/chrome node scripts/smoke-local-host.mjs
 ```
 
-## Validation of this branch
+## Validation of the localhost-hosting base
 
 Production build, typecheck, and packaging passed. Lint passed with one
 existing warning in `tests/source-name-ui.test.tsx`. All 26 focused

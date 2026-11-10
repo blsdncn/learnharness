@@ -5,6 +5,6 @@ import { persistCustomAuth } from "../../src/server/custom-provider-auth.ts";
 
 export function authorizeFixture(cp: CustomProviderSettings, fileKey?: string): CustomProviderSettings {
 	const id = randomBytes(16).toString("hex");
-	persistCustomAuth({ version: 1, id, baseUrl: cp.baseUrl, authMode: cp.authMode ?? "keyless", ...(fileKey ? { fileKeyBaseUrl: cp.baseUrl } : {}) }, fileKey);
+	persistCustomAuth({ version: cp.socketPath === undefined ? 1 : 2, id, baseUrl: cp.baseUrl, ...(cp.socketPath === undefined ? {} : { socketPath: cp.socketPath }), authMode: cp.authMode ?? "keyless", ...(fileKey ? { fileKeyBaseUrl: cp.baseUrl, ...(cp.socketPath === undefined ? {} : { fileKeySocketPath: cp.socketPath }) } : {}) }, fileKey);
 	return { ...cp, credentialBindingId: id };
 }
