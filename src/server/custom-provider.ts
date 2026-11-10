@@ -6,6 +6,7 @@
  */
 
 import { createProvider, type Api, type Model, type Provider } from "@earendil-works/pi-ai";
+import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { configureProviderSource, piModels } from "../agent/models.ts";
 import { readSettings } from "../store/settings.ts";
@@ -19,6 +20,7 @@ import {
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	customProviderUsable,
 	normalizeBaseUrl,
+	type CustomProviderApi,
 	type CustomModel,
 	type CustomModelOverride,
 } from "../core/settings.ts";
@@ -67,12 +69,13 @@ function toPiModel(
 	model: CustomModel,
 	baseUrl: string,
 	overrides: Record<string, CustomModelOverride>,
+	api: CustomProviderApi,
 ): Model<Api> {
 	const pin = overrides[model.id];
 	return {
 		id: model.id,
 		name: model.id,
-		api: "openai-completions",
+		api,
 		provider: CUSTOM_PROVIDER.id,
 		baseUrl,
 		// Pin wins; else detected from the endpoint's metadata (see
@@ -90,6 +93,7 @@ function toPiModel(
 
 /** Build an OpenAI-compatible provider from parts. baseUrl must be normalized. */
 export function buildOpenAiCompatibleProvider(input: {
+	api?: CustomProviderApi;
 	baseUrl: string;
 	socketPath?: string;
 	models: readonly CustomModel[];
@@ -99,7 +103,9 @@ export function buildOpenAiCompatibleProvider(input: {
 	apiKey?: string;
 }): Provider<Api> {
 	const overrides = input.overrides ?? {};
-	const api = openAICompletionsApi();
+	if (input.api !== undefined && input.api !== "openai-completions" && input.api !== "openai-responses") throw new Error("Unsupported custom endpoint API.");
+	const selectedApi = input.api ?? "openai-completions";
+	const api = selectedApi === "openai-responses" ? openAIResponsesApi() : openAICompletionsApi();
 	const socketFetch = input.socketPath === undefined ? undefined : unixSocketFetch(input.socketPath, input.baseUrl);
 	return createProvider<Api>({
 		id: CUSTOM_PROVIDER.id,
@@ -109,7 +115,7 @@ export function buildOpenAiCompatibleProvider(input: {
 			name: `${CUSTOM_PROVIDER.label} API key`,
 			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? CUSTOM_PROVIDER.envVar : "keyless" }),
 		} },
-		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides)),
+		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides, selectedApi)),
 		api: socketFetch ? {
 			stream: (model, context, options) => api.stream(model, context, { ...options, fetch: socketFetch }),
 			streamSimple: (model, context, options) => api.streamSimple(model, context, { ...options, fetch: socketFetch }),

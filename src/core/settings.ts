@@ -256,8 +256,12 @@ export interface CustomModelOverride {
 	reasoning?: boolean;
 }
 
+export type CustomProviderApi = "openai-completions" | "openai-responses";
+
 /** The single custom endpoint's stored config (delta section). */
 export interface CustomProviderSettings {
+	/** Missing in older profiles means Chat Completions. */
+	api?: CustomProviderApi;
 	/** Server-owned random authorization nonce; never a credential hash. */
 	credentialBindingId?: string;
 	/** Explicit authentication intent; never inferred from a saved key. */
@@ -662,6 +666,10 @@ export function sanitizeCustomModelOverrides(
  *  true; token counts only as positive ints). Clamp-never-reject. */
 function sanitizeCustomProvider(raw: Record<string, unknown>): CustomProviderSettings {
 	const out: CustomProviderSettings = {};
+	if (raw.api !== undefined) {
+		if (raw.api !== "openai-completions" && raw.api !== "openai-responses") return {};
+		out.api = raw.api;
+	}
 	// Preserve an invalid socket selection as unusable; never turn it into TCP.
 	if (raw.socketPath !== undefined) out.socketPath = normalizeSocketPath(raw.socketPath);
 	if (typeof raw.credentialBindingId === "string" && /^[a-f0-9]{32}$/.test(raw.credentialBindingId)) out.credentialBindingId = raw.credentialBindingId;

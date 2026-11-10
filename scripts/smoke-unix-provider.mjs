@@ -9,12 +9,17 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { responseFrames } from "./responses-fixture.mjs";
 import { probeEnv } from "./smoke-demo-runtime.mjs";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-uds-smoke-"));
 const socketPath = path.join(home, "provider.sock");
 const appIndex = process.argv.indexOf("--appimage");
 const image = appIndex < 0 ? undefined : path.resolve(process.argv[appIndex + 1]);
+const apiIndex = process.argv.indexOf("--api");
+const api = apiIndex < 0 ? "openai-completions" : process.argv[apiIndex + 1];
+assert.ok(["openai-completions", "openai-responses"].includes(api), "Unsupported --api choice");
+const unix = !process.argv.includes("--tcp");
 let tcpRequests = 0, discoveries = 0, generations = 0;
 const decoy = http.createServer((_req, res) => { tcpRequests++; res.writeHead(500); res.end("TCP must never be used"); });
 const fixture = http.createServer(async (req, res) => {
@@ -25,18 +30,21 @@ const fixture = http.createServer(async (req, res) => {
 		res.end(JSON.stringify({ data: [{ id: "gpt-5.6-luna", context_length: 131072, max_output_tokens: 4096 }] }));
 		return;
 	}
-	assert.equal(req.url, "/v1/chat/completions"); assert.equal(req.method, "POST");
+	assert.equal(req.url, api === "openai-responses" ? "/v1/responses" : "/v1/chat/completions"); assert.equal(req.method, "POST");
 	const chunks = []; for await (const chunk of req) chunks.push(chunk);
 	const bytes = Buffer.concat(chunks);
 	// Model the reported gateway: reject chunked requests instead of silently
 	// accepting Node's automatically decoded body in this synthetic server.
-	if (req.headers["transfer-encoding"] || !req.headers["content-length"]) {
+	if (unix && (req.headers["transfer-encoding"] || !req.headers["content-length"])) {
 		res.writeHead(403, { "content-type": "application/json" });
 		res.end(JSON.stringify({ error: "missing model for request" })); return;
 	}
-	assert.equal(Number(req.headers["content-length"]), bytes.length);
+	if (unix) assert.equal(Number(req.headers["content-length"]), bytes.length);
+	const payload = JSON.parse(bytes.toString("utf8"));
+	assert.ok(Array.isArray(api === "openai-responses" ? payload.input : payload.messages));
 	assert.equal(JSON.parse(bytes.toString("utf8")).model, "gpt-5.6-luna"); generations++;
 	res.writeHead(200, { "content-type": "text/event-stream" });
+	if (api === "openai-responses") { res.end(responseFrames().join("")); return; }
 	res.write(`data: ${JSON.stringify({ id: "offline-fixture", choices: [{ index: 0, delta: { role: "assistant", content: "socket fixture response" }, finish_reason: null }] })}\n\n`);
 	res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 3 } })}\n\ndata: [DONE]\n\n`);
 });
@@ -50,7 +58,8 @@ let running;
 let backendOutput = "";
 try {
 	const decoyPort = (await listen(decoy, { host: "127.0.0.1", port: 0 })).port;
-	await listen(fixture, socketPath);
+	const fixtureAddress = await listen(fixture, unix ? socketPath : { host: "127.0.0.1", port: 0 });
+	const baseUrl = `http://127.0.0.1:${unix ? decoyPort : fixtureAddress.port}/v1`;
 	const reserve = net.createServer();
 	const port = (await listen(reserve, { host: "127.0.0.1", port: 0 })).port;
 	await new Promise(resolve => reserve.close(resolve));
@@ -95,15 +104,15 @@ try {
 	}
 	await start();
 	const revision = (await request("/api/custom-provider")).headers.get("etag");
-	await request("/api/custom-provider", "POST", { baseUrl: `http://127.0.0.1:${decoyPort}/v1`, socketPath, authMode: "apiKey", key: "synthetic-socket-key" }, { "if-match": revision });
+	await request("/api/custom-provider", "POST", { api, baseUrl, ...(unix ? { socketPath } : {}), authMode: "apiKey", key: "synthetic-socket-key" }, { "if-match": revision });
 	await request("/api/settings/models", "PUT", { strong: { model: { provider: "custom", id: "gpt-5.6-luna" } } });
 	await generate(); await stop(); await start();
 	const restored = await (await request("/api/custom-provider")).json();
-	assert.equal(restored.socketPath, socketPath); assert.equal(restored.keyPresent, true);
+	assert.equal(restored.api, api); assert.equal(restored.socketPath, unix ? socketPath : undefined); assert.equal(restored.keyPresent, true);
 	await generate(); await stop();
 	assert.equal(tcpRequests, 0); assert.equal(discoveries, 1); assert.ok(generations >= 2);
-	assert.ok(fs.statSync(socketPath).isSocket());
-	console.log(`[smoke-unix-provider] ${image ? "AppImage" : "standalone"}: discovery and chat generation over AF_UNIX; exact Content-Length, no chunked request encoding; restart retained socket/key; ${generations} synthetic generations; zero TCP requests; clean shutdown`);
+	if (unix) assert.ok(fs.statSync(socketPath).isSocket());
+	console.log(`[smoke-unix-provider] ${image ? "AppImage" : "standalone"}: ${api} discovery and chat generation over ${unix ? "AF_UNIX with fixed Content-Length" : "TCP"}; restart retained socket/key; ${generations} synthetic generations; zero TCP requests; clean shutdown`);
 } finally {
 	if (running && running.child.exitCode === null && running.child.signalCode === null) { running.child.kill("SIGKILL"); await running.exited; }
 	for (const server of [fixture, decoy]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

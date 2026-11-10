@@ -5,7 +5,7 @@ LearnHarness supports **one custom OpenAI-compatible endpoint with multiple mode
 ## Connect
 
 1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or use the first-run provider picker.
-2. Choose **TCP** or **Unix socket** and enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. TCP supports HTTP/HTTPS and private-network addresses; embedded credentials, query strings, fragments, and discovery redirects are rejected. Unix socket setup is described below.
+2. Choose **Chat Completions** or **Responses**, then **TCP** or **Unix socket**, and enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. TCP supports HTTP/HTTPS and private-network addresses; embedded credentials, query strings, fragments, and discovery redirects are rejected. Unix socket setup is described below.
 3. Choose **Keyless** or **API key**. Keyless ignores saved/environment custom keys. API key uses `CUSTOM_OPENAI_API_KEY`; a real environment value overrides a saved value, and the editor identifies environment ownership.
 4. Optionally enter model IDs, separated by commas or whitespace, for servers without working model discovery.
 5. Click **Connect**, then select Strong, Cheap, and Vision models.
@@ -16,6 +16,33 @@ Connect requests `GET <base>/models`; reported metadata wins over duplicate ente
 
 Discovery is not a continuous health or capability check. LearnHarness does not install a backend, download models, or perform custom-endpoint OAuth.
 
+## Select the API
+
+The custom endpoint's **API** selector applies to all its models and works
+independently of the transport:
+
+| Selection | Generation route | Request format |
+| --- | --- | --- |
+| Chat Completions (default) | `<base>/chat/completions` | `messages` |
+| Responses | `<base>/responses` | `input`, with `store: false` |
+
+Existing profiles continue using Chat Completions. The selected API is saved
+and restored after restart. Discovery still uses `<base>/models` with either
+API; manual IDs remain available. There is no automatic API detection or
+fallback to the other API on failure. Switching APIs at the same URL/socket
+uses the existing effective credential after you click Connect and preserves
+model limit pins. Each subsequent model operation uses the current selection;
+requests already in flight retain their original adapter.
+
+Both choices use Pi's native encoding, streaming, tool-call/result handling,
+and usage accounting. Responses uses the [typed Responses streaming events](https://developers.openai.com/api/docs/guides/streaming-responses).
+The endpoint must implement the selected protocol; this option does not add
+OpenAI-hosted tools to a third-party server.
+
+Responses configurations use a version 3 private authorization binding so
+older builds reject the unsupported protocol instead of silently sending Chat
+Completions requests. Chat Completions retains the existing binding format.
+
 ## HTTP over a Unix socket
 
 On Linux or macOS, choose **Unix socket** in the same custom endpoint editor:
@@ -24,8 +51,8 @@ On Linux or macOS, choose **Unix socket** in the same custom endpoint editor:
 - Base URL: `http://localhost/v1`, or the HTTP Host and API prefix your server expects.
 - Authentication: the same Keyless or API key options as TCP.
 
-The socket must serve an OpenAI-compatible HTTP API, including streaming chat
-completions. The base URL supplies the Host header and request path; it does
+The socket must serve the selected OpenAI-compatible HTTP API, including its
+streaming protocol. The base URL supplies the Host header and request path; it does
 not cause a TCP connection. Both discovery and generation connect through the
 socket. Unix socket transport requires plain `http://`; TLS over sockets,
 abstract sockets, Windows named pipes, and WebSocket APIs are not supported.
@@ -50,7 +77,7 @@ You can check a keyless backend before connecting it:
 curl --unix-socket /run/llm.sock http://localhost/v1/models
 ```
 
-Socket configurations use a version 2 private credential binding. Existing TCP
+Chat Completions socket configurations use a version 2 private credential binding. Existing TCP
 bindings remain compatible. Older builds reject the newer binding rather than
 reinterpreting the socket configuration as TCP; reconnect explicitly if you
 switch back to an older build. When an environment key changes sockets, a
@@ -112,20 +139,27 @@ and synthetic chat generation in the built server, including restart. Use
 packaged application instead; it needs a graphical session or Xvfb. All these
 checks use disposable profiles and a synthetic provider, not real inference.
 
+`tests/custom-responses.test.ts` covers real TCP and Unix socket Responses
+streams, function calls/results, usage, cancellation, failed streams, API
+switching, legacy defaults, and restart persistence. The production smoke
+accepts `--api openai-responses` and `--tcp` to exercise each API/transport
+combination, including with `--appimage`.
+
 For this variation, follow the [AppImage build pipeline](localhost-appimage.md#build)
 and give Electron Builder a separate output directory:
 
 ```sh
-npx electron-builder --config electron-builder.local.yml --linux AppImage --x64 --publish never -c.directories.output=dist/unix-socket
+npx electron-builder --config electron-builder.local.yml --linux AppImage --x64 --publish never -c.directories.output=dist/responses
 ```
 
 The resulting artifact is
-`dist/unix-socket/LearnHarness-Local-0.5.0-x86_64.AppImage`. Validation passed:
-94 custom-provider/socket/UI tests, 122 settings/authentication/API regression
-tests, and 28 native-rendering tests; production build, typecheck, and lint
-(one existing warning); standalone and actual AppImage discovery/chat over
-AF_UNIX before and after restart with zero TCP traffic; packaged provider and
-demo checks; and the existing AppImage desktop/localhost-forwarding smoke.
+`dist/responses/LearnHarness-Local-0.5.0-x86_64.AppImage`. Responses-option
+validation passed: 226 selected tests (104 custom-provider/socket/UI and 122
+settings/authentication/API regression tests); production build, typecheck,
+and lint (one existing warning); standalone and actual AppImage discovery/chat
+before and after restart for both APIs over TCP and Unix sockets; and the
+existing AppImage desktop/localhost-forwarding smoke. The TCP decoy receives
+no traffic during Unix socket requests. All generation checks use fixtures.
 
 The request-buffering fix adds checks for exact UTF-8 byte lengths, unchanged
 `gpt-5.6-luna` JSON payloads, cancellation before/during buffering, and input

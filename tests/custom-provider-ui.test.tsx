@@ -11,10 +11,10 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, Element:
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
 let host: HTMLElement | undefined;
-async function mount(setup = false, socketPath?: string) {
+async function mount(setup = false, socketPath?: string, api?: "openai-completions" | "openai-responses") {
 	globalThis.fetch = async (input, init) => {
 		assert.equal(init?.method ?? "GET", "GET", "polish interactions must not save credentials/settings");
-		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", ...(socketPath === undefined ? {} : { socketPath }), authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", ...(api === undefined ? {} : { api }), ...(socketPath === undefined ? {} : { socketPath }), authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
 		return Response.json({ keys: [], providers: [] });
 	};
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -80,7 +80,32 @@ for (const transport of ["unix", "tcp"]) {
 		};
 		await click("custom-save");
 		assert.equal(saves.length, 1);
+		assert.equal(saves[0]!.api, "openai-completions");
 		assert.equal(saves[0]!.baseUrl, "http://fixture.invalid/v1");
 		assert.equal(saves[0]!.socketPath, transport === "unix" ? "/run/fixture.sock" : undefined);
 	});
+}
+
+for (const socketPath of [undefined, "/run/fixture.sock"]) {
+ test(`API selection persists and saves Responses over ${socketPath ? "Unix socket" : "TCP"}`, async () => {
+  await mount(false, socketPath);
+  const select = element("custom-api");
+  assert.deepEqual(Array.from(select.children).map(option => option.textContent), ["Chat Completions", "Responses"]);
+  Object.defineProperty(select, "value", { value: "openai-responses", configurable: true });
+  await act(async () => select.dispatchEvent(new dom.window.Event("change", { bubbles: true })));
+  const read = globalThis.fetch; const saves: Record<string, unknown>[] = [];
+  globalThis.fetch = async (input, init) => {
+   if (init?.method === "POST") { saves.push(JSON.parse(String(init.body))); return Response.json({ ok: true }); }
+   return read(input, init);
+  };
+  await click("custom-save");
+  assert.equal(saves[0]!.api, "openai-responses"); assert.equal(saves[0]!.socketPath, socketPath);
+ });
+}
+for (const setup of [false, true]) {
+ test(`${setup ? "Setup" : "Settings"} restores a saved Responses selection`, async () => {
+  await mount(setup, "/run/fixture.sock", "openai-responses");
+  const option = Array.from(element("custom-api").children).find(node => node.getAttribute("value") === "openai-responses")!;
+  assert.ok((option as HTMLOptionElement).selected);
+ });
 }

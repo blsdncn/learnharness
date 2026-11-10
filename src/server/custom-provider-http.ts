@@ -40,7 +40,7 @@ export function customProviderGet(request: Request): Response {
 	const current = snapshot();
 	const s = snapshot(inspect || current.cp?.authMode === "apiKey");
 	return response({
-		baseUrl: s.cp?.baseUrl ?? "", ...(s.cp?.socketPath !== undefined ? { socketPath: s.cp.socketPath } : {}), authMode: s.cp?.authMode ?? "keyless",
+		api: s.cp?.api ?? "openai-completions", baseUrl: s.cp?.baseUrl ?? "", ...(s.cp?.socketPath !== undefined ? { socketPath: s.cp.socketPath } : {}), authMode: s.cp?.authMode ?? "keyless",
 		models: s.cp?.models ?? [], overrides: s.cp?.overrides ?? {}, manualModels: s.cp?.manualModels ?? [],
 		keyPresent: Boolean(s.key), keySource: s.auth.source,
 		keyReuseRequired: Boolean(s.key) && !customKeyAuthorized(s.cp, s.auth),
@@ -106,6 +106,8 @@ export async function customProviderMutation(request: Request): Promise<Response
 			return response({ ok: true, overrides });
 		}
 		if (request.method !== "POST") return failure("Unsupported method", 405);
+		const api = raw.api === undefined ? "openai-completions" : raw.api;
+		if (api !== "openai-completions" && api !== "openai-responses") return failure("Choose Chat Completions or Responses API.");
 		const base = normalizeBaseUrl(typeof raw.baseUrl === "string" ? raw.baseUrl : "");
 		if (!base) return failure("Base URL must be http(s), with no credentials, query or fragment.");
 		const socketPath = raw.socketPath === undefined ? undefined : normalizeSocketPath(raw.socketPath);
@@ -145,8 +147,8 @@ export async function customProviderMutation(request: Request): Promise<Response
 		const fileKeyBaseUrl = authMode === "apiKey" ? envOwned ? now.auth.binding?.fileKeyBaseUrl : base : undefined;
 		const fileKeySocketPath = authMode === "apiKey" ? envOwned ? now.auth.binding?.fileKeySocketPath : socketPath : undefined;
 		const socket = socketPath === undefined ? {} : { socketPath };
-		const binding: CustomAuthBinding = { version: socketPath !== undefined || fileKeySocketPath !== undefined ? 2 : 1, id, baseUrl: base, ...socket, authMode, ...(fileKey && fileKeyBaseUrl ? { fileKeyBaseUrl, ...(fileKeySocketPath === undefined ? {} : { fileKeySocketPath }) } : {}) };
-		commit({ baseUrl: base, ...socket, authMode, credentialBindingId: id, models, overrides, ...(manualModels.length ? { manualModels } : {}) }, binding, fileKey);
+		const binding: CustomAuthBinding = { version: api === "openai-responses" ? 3 : socketPath !== undefined || fileKeySocketPath !== undefined ? 2 : 1, ...(api === "openai-responses" ? { api } : {}), id, baseUrl: base, ...socket, authMode, ...(fileKey && fileKeyBaseUrl ? { fileKeyBaseUrl, ...(fileKeySocketPath === undefined ? {} : { fileKeySocketPath }) } : {}) };
+		commit({ api, baseUrl: base, ...socket, authMode, credentialBindingId: id, models, overrides, ...(manualModels.length ? { manualModels } : {}) }, binding, fileKey);
 		return response({ ok: true, models });
 	} catch (error) {
 		return failure(error instanceof CustomBodyLimitError ? "Configuration body exceeds 64 KiB." : error instanceof SyntaxError ? "Invalid JSON body." : "Unable to save custom configuration. Reload configuration and retry.", error instanceof CustomBodyLimitError ? 413 : error instanceof SyntaxError ? 400 : 500);

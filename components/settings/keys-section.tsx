@@ -32,6 +32,7 @@ import {
 	normalizeBaseUrl,
 	normalizeSocketPath,
 	type AuthKeyStatus,
+	type CustomProviderApi,
 	type CustomModel,
 	type CustomModelOverride,
 } from "@/src/core";
@@ -58,6 +59,7 @@ interface KeysResponse {
 
 /** The custom endpoint's non-secret status (GET /api/custom-provider). */
 interface CustomStatus {
+	api: CustomProviderApi;
 	keyReuseRequired: boolean;
 	revision: string;
 	authMode: "keyless" | "apiKey";
@@ -75,7 +77,7 @@ async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
 	const response = await fetch(`/api/custom-provider${inspectKey ? "?authMode=apiKey" : ""}`);
 	if (!response.ok) throw new Error("Unable to load custom configuration.");
 	const cp = await response.json() as Partial<CustomStatus>;
-	return { keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", ...(cp.socketPath === undefined ? {} : { socketPath: cp.socketPath }), models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
+	return { api: cp.api ?? "openai-completions", keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", ...(cp.socketPath === undefined ? {} : { socketPath: cp.socketPath }), models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -528,6 +530,7 @@ export function KeysSection({
 						onReload={async () => { await reload(); setAddingCustom(false); }}
 						baseUrl0={custom?.baseUrl ?? ""}
 						socketPath0={custom?.socketPath}
+						api0={custom?.api ?? "openai-completions"}
 						keyPresent={custom?.keyPresent ?? false}
 						models={custom?.models ?? []}
 						overrides={custom?.overrides ?? {}}
@@ -684,7 +687,7 @@ export function CustomEndpointSetup({ onSaved }: { onSaved: () => void | Promise
 	}
 	useEffect(() => { void reload(); }, []);
 	if (!status || error) return <div className="text-xs">{error ? "Unable to load custom configuration." : "Loading custom configuration…"}{error && <button onClick={() => void reload()}>Retry</button>}</div>;
-	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} socketPath0={status.socketPath} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
+	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} socketPath0={status.socketPath} api0={status.api} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
 }
 
 /** The custom endpoint's status row (shown once configured); clicking re-opens the editor. */
@@ -698,7 +701,7 @@ function CustomEndpointRow({
 	onToggle: () => void;
 }) {
 	const count = status.models.length;
-	const line = `${status.socketPath === undefined ? "" : `${status.socketPath} → `}${status.baseUrl} · ${count} model${count === 1 ? "" : "s"} · ${status.authMode === "keyless" ? "keyless" : status.keyPresent ? "API key" : "API key missing"}`;
+	const line = `${status.api === "openai-responses" ? "Responses · " : ""}${status.socketPath === undefined ? "" : `${status.socketPath} → `}${status.baseUrl} · ${count} model${count === 1 ? "" : "s"} · ${status.authMode === "keyless" ? "keyless" : status.keyPresent ? "API key" : "API key missing"}`;
 	return (
 		<div data-testid="custom-endpoint-row">
 			<button
@@ -763,7 +766,7 @@ const pinTestid = (prefix: string, id: string) => `${prefix}-${id.replace(/[^a-z
 function CustomEndpointEditor({
 	setup = false,
 	revision0, authMode0, keySource0, keyReuseRequired0, onReload,
-	baseUrl0, socketPath0,
+	baseUrl0, socketPath0, api0,
 	keyPresent: initialKeyPresent,
 	models,
 	overrides,
@@ -781,6 +784,7 @@ function CustomEndpointEditor({
 	onReload: () => void | Promise<void>;
 	baseUrl0: string;
 	socketPath0?: string;
+	api0: CustomProviderApi;
 	keyPresent: boolean;
 	/** The discovered models — one limits row each. */
 	models: readonly CustomModel[];
@@ -815,6 +819,7 @@ function CustomEndpointEditor({
 		return () => { cancelled = true; };
 	}, [authMode]);
 	const [baseUrl, setBaseUrl] = useState(baseUrl0);
+	const [api, setApi] = useState(api0);
 	const [transport, setTransport] = useState(socketPath0 === undefined ? "tcp" : "unix");
 	const [socketPath, setSocketPath] = useState(socketPath0 ?? "");
 	const [key, setKey] = useState("");
@@ -869,7 +874,7 @@ function CustomEndpointEditor({
 		const res = await fetch("/api/custom-provider", {
 			method: "POST",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ baseUrl, ...(transport === "unix" ? { socketPath } : {}), authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
+			body: JSON.stringify({ api, baseUrl, ...(transport === "unix" ? { socketPath } : {}), authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -883,6 +888,11 @@ function CustomEndpointEditor({
 
 	return (
 		<div data-testid="custom-endpoint-editor" className="flex flex-col gap-2 rounded-sm px-1 py-1.5">
+			<label className="flex items-center gap-2 text-xs">API
+				<select aria-label="Custom endpoint API" data-testid="custom-api" value={api} disabled={busy || pinsBusy} onChange={(e) => setApi(e.target.value as CustomProviderApi)}>
+					<option value="openai-completions">Chat Completions</option><option value="openai-responses">Responses</option>
+				</select>
+			</label>
 			<label className="flex items-center gap-2 text-xs">Transport
 				<select aria-label="Custom endpoint transport" data-testid="custom-transport" value={transport} disabled={busy || pinsBusy} onChange={(e) => { setTransport(e.target.value); setReuseKey(false); }}>
 					<option value="tcp">TCP</option><option value="unix">Unix socket</option>
