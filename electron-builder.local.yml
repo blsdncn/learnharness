@@ -1,0 +1,12 @@
+# Custom v0.5.0 build: desktop by default, --local-host for browser hosting.
+extends: ./electron-builder.yml
+appId: com.learnharness.LearnHarness.Local
+productName: LearnHarness Local
+extraMetadata:
+  lhLocalBuild: true
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: "LearnHarness-Local-${version}-${arch}.${ext}"
