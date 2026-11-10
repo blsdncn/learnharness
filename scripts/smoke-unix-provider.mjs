@@ -22,12 +22,20 @@ const fixture = http.createServer(async (req, res) => {
 	if (req.url === "/v1/models" && req.method === "GET") {
 		discoveries++;
 		res.setHeader("content-type", "application/json");
-		res.end(JSON.stringify({ data: [{ id: "socket-fixture", context_length: 131072, max_output_tokens: 4096 }] }));
+		res.end(JSON.stringify({ data: [{ id: "gpt-5.6-luna", context_length: 131072, max_output_tokens: 4096 }] }));
 		return;
 	}
 	assert.equal(req.url, "/v1/chat/completions"); assert.equal(req.method, "POST");
-	let body = ""; for await (const chunk of req) body += chunk;
-	assert.equal(JSON.parse(body).model, "socket-fixture"); generations++;
+	const chunks = []; for await (const chunk of req) chunks.push(chunk);
+	const bytes = Buffer.concat(chunks);
+	// Model the reported gateway: reject chunked requests instead of silently
+	// accepting Node's automatically decoded body in this synthetic server.
+	if (req.headers["transfer-encoding"] || !req.headers["content-length"]) {
+		res.writeHead(403, { "content-type": "application/json" });
+		res.end(JSON.stringify({ error: "missing model for request" })); return;
+	}
+	assert.equal(Number(req.headers["content-length"]), bytes.length);
+	assert.equal(JSON.parse(bytes.toString("utf8")).model, "gpt-5.6-luna"); generations++;
 	res.writeHead(200, { "content-type": "text/event-stream" });
 	res.write(`data: ${JSON.stringify({ id: "offline-fixture", choices: [{ index: 0, delta: { role: "assistant", content: "socket fixture response" }, finish_reason: null }] })}\n\n`);
 	res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 3 } })}\n\ndata: [DONE]\n\n`);
@@ -77,7 +85,7 @@ try {
 	}
 	async function generate() {
 		const { id } = await (await request("/api/chats", "POST", { title: "Synthetic socket verification" })).json();
-		await request("/api/chat", "POST", { chatId: id, input: { type: "text", text: "Synthetic transport test" } });
+		await request("/api/chat", "POST", { chatId: id, input: { type: "text", text: "Synthetic transport test: héllo 🌙 世界" } });
 		await until(async () => {
 			const record = await (await request(`/api/chats/${id}`)).json();
 			if (record.turnInFlight) return false;
@@ -88,14 +96,14 @@ try {
 	await start();
 	const revision = (await request("/api/custom-provider")).headers.get("etag");
 	await request("/api/custom-provider", "POST", { baseUrl: `http://127.0.0.1:${decoyPort}/v1`, socketPath, authMode: "apiKey", key: "synthetic-socket-key" }, { "if-match": revision });
-	await request("/api/settings/models", "PUT", { strong: { model: { provider: "custom", id: "socket-fixture" } } });
+	await request("/api/settings/models", "PUT", { strong: { model: { provider: "custom", id: "gpt-5.6-luna" } } });
 	await generate(); await stop(); await start();
 	const restored = await (await request("/api/custom-provider")).json();
 	assert.equal(restored.socketPath, socketPath); assert.equal(restored.keyPresent, true);
 	await generate(); await stop();
 	assert.equal(tcpRequests, 0); assert.equal(discoveries, 1); assert.ok(generations >= 2);
 	assert.ok(fs.statSync(socketPath).isSocket());
-	console.log(`[smoke-unix-provider] ${image ? "AppImage" : "standalone"}: discovery and chat generation over AF_UNIX; restart retained socket/key; ${generations} synthetic generations; zero TCP requests; clean shutdown`);
+	console.log(`[smoke-unix-provider] ${image ? "AppImage" : "standalone"}: discovery and chat generation over AF_UNIX; exact Content-Length, no chunked request encoding; restart retained socket/key; ${generations} synthetic generations; zero TCP requests; clean shutdown`);
 } finally {
 	if (running && running.child.exitCode === null && running.child.signalCode === null) { running.child.kill("SIGKILL"); await running.exited; }
 	for (const server of [fixture, decoy]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

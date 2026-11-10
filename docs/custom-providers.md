@@ -30,6 +30,13 @@ not cause a TCP connection. Both discovery and generation connect through the
 socket. Unix socket transport requires plain `http://`; TLS over sockets,
 abstract sockets, Windows named pipes, and WebSocket APIs are not supported.
 
+Outgoing request bodies are automatically buffered and sent with their exact
+byte `Content-Length`, without chunked request encoding. This supports socket
+gateways that cannot decode chunked bodies. Response SSE remains streamed,
+including text and tool calls. Buffering uses memory proportional to the
+request size, including any inline image data; cancellation remains supported
+during buffering and response streaming.
+
 The socket is on the machine running LearnHarness, including when the UI is
 in another machine's browser. LearnHarness connects to an existing socket; it
 does not create/delete it or change its permissions. Relative paths, `~`, and
@@ -114,8 +121,14 @@ npx electron-builder --config electron-builder.local.yml --linux AppImage --x64 
 
 The resulting artifact is
 `dist/unix-socket/LearnHarness-Local-0.5.0-x86_64.AppImage`. Validation passed:
-90 custom-provider/socket/UI tests, 122 settings/authentication/API regression
+94 custom-provider/socket/UI tests, 122 settings/authentication/API regression
 tests, and 28 native-rendering tests; production build, typecheck, and lint
 (one existing warning); standalone and actual AppImage discovery/chat over
 AF_UNIX before and after restart with zero TCP traffic; packaged provider and
 demo checks; and the existing AppImage desktop/localhost-forwarding smoke.
+
+The request-buffering fix adds checks for exact UTF-8 byte lengths, unchanged
+`gpt-5.6-luna` JSON payloads, cancellation before/during buffering, and input
+stream errors. The production and AppImage smoke fixture rejects chunked
+requests with a `403 missing model for request` response, and verifies
+discovery/chat generation before and after restart with fixed-length requests.

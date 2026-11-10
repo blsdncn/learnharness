@@ -88,13 +88,87 @@ test("Unix transport bypasses framework wrappers of global fetch", async t => {
 	finally { globalThis.fetch = original; }
 });
 
+test("buffered requests carry exact UTF-8 Content-Length and preserve the model and JSON", async t => {
+	const payload = JSON.stringify({ model: "gpt-5.6-luna", messages: [{ role: "user", content: "héllo 🌙 世界" }], stream: true });
+	assert.notEqual(payload.length, Buffer.byteLength(payload));
+	let received = 0;
+	const socket = await fixture(t, async (req, res) => {
+		let body = ""; for await (const chunk of req) body += chunk;
+		if (req.headers["transfer-encoding"] || !req.headers["content-length"]) {
+			res.writeHead(403); res.end("missing model for request"); return;
+		}
+		assert.equal(req.headers["content-length"], String(Buffer.byteLength(payload)));
+		assert.equal(req.headers["content-type"], "application/json");
+		assert.equal(body, payload); assert.equal(JSON.parse(body).model, "gpt-5.6-luna");
+		received++; res.end("accepted");
+	});
+	const transport = unixSocketFetch(socket.address, socket.base);
+	for (const body of [payload, new TextEncoder().encode(payload), new ReadableStream<Uint8Array>({
+		start(controller) { const bytes = new TextEncoder().encode(payload); controller.enqueue(bytes.slice(0, 17)); controller.enqueue(bytes.slice(17)); controller.close(); },
+	})]) {
+		const response = await transport(socket.base + "/chat/completions", {
+			method: "POST", headers: { "content-type": "application/json", "content-length": "1", "transfer-encoding": "chunked" }, body,
+			...(body instanceof ReadableStream ? { duplex: "half" } : {}),
+		} as RequestInit);
+		assert.equal(response.status, 200); assert.equal(await response.text(), "accepted");
+	}
+	assert.equal(received, 3);
+});
+
+test("bodyless discovery requests have no fabricated body or framing headers", async t => {
+	const socket = await fixture(t, async (req, res) => {
+		assert.equal(req.headers["transfer-encoding"], undefined);
+		assert.equal(req.headers["content-length"], undefined);
+		let body = ""; for await (const chunk of req) body += chunk;
+		assert.equal(body, ""); res.end("ok");
+	});
+	for (const method of ["GET", "HEAD"]) {
+		const response = await unixSocketFetch(socket.address, socket.base)(socket.base + "/models", { method });
+		assert.equal(response.status, 200); await response.text();
+	}
+});
+
+test("abort before or during buffering cancels input without contacting the socket", { timeout: 10000 }, async t => {
+	let requests = 0;
+	const socket = await fixture(t, (_req, res) => { requests++; res.end("unexpected"); });
+	const transport = unixSocketFetch(socket.address, socket.base);
+	const reason = new DOMException("Synthetic cancellation", "AbortError");
+	const preAborted = new AbortController(); preAborted.abort(reason);
+	await assert.rejects(transport(socket.base, { method: "POST", body: "{}", signal: preAborted.signal }), error => error === reason);
+	let started!: () => void;
+	const ready = new Promise<void>(resolve => { started = resolve; });
+	let cancelled!: (value: unknown) => void;
+	const cancellation = new Promise(resolve => { cancelled = resolve; });
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) { controller.enqueue(new TextEncoder().encode('{"model":')); },
+		pull() { started(); }, cancel(value) { cancelled(value); },
+	});
+	const controller = new AbortController();
+	const pending = transport(socket.base, { method: "POST", body, duplex: "half", signal: controller.signal } as RequestInit);
+	const rejected = assert.rejects(pending, error => error === reason);
+	await ready; controller.abort(reason);
+	await rejected; assert.equal(await cancellation, reason); assert.equal(requests, 0);
+});
+
+test("input stream errors propagate before a socket connection is opened", async t => {
+	let requests = 0;
+	const socket = await fixture(t, (_req, res) => { requests++; res.end("unexpected"); });
+	const reason = new Error("Synthetic input failure");
+	const body = new ReadableStream<Uint8Array>({ start(controller) { controller.error(reason); } });
+	await assert.rejects(unixSocketFetch(socket.address, socket.base)(socket.base, { method: "POST", body, duplex: "half" } as RequestInit), error => error === reason);
+	assert.equal(requests, 0);
+});
+
 test("native provider streams before completion and decodes tool calls", { timeout: 10000 }, async t => {
 	let complete!: () => void;
 	let call = 0;
 	const socket = await fixture(t, async (req, res) => {
 		assert.equal(req.url, "/v1/chat/completions");
 		assert.equal(req.headers.authorization, "Bearer fixture-key");
-		for await (const _chunk of req) { /* drain request */ }
+		assert.equal(req.headers["transfer-encoding"], undefined);
+		let body = ""; for await (const chunk of req) body += chunk;
+		assert.equal(req.headers["content-length"], String(Buffer.byteLength(body)));
+		assert.equal(JSON.parse(body).model, "fixture");
 		res.writeHead(200, { "content-type": "text/event-stream" });
 		if (++call === 1) {
 			const released = new Promise<void>(resolve => { complete = resolve; });
